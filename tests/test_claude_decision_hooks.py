@@ -73,39 +73,39 @@ class DecisionHookTests(unittest.TestCase):
         path.write_text("".join(json.dumps(e) + "\n" for e in entries))
         return str(path)
 
-    # --- Portão Bash ---------------------------------------------------------------------------
+    # --- Bash gate -------------------------------------------------------------------------------
     def bash(self, command):
         return {"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "s1", "cwd": "/w",
                 "tool_input": {"command": command, "description": "d"}}
 
     def test_bash_gate_skips_routine_commands_without_consulting(self):
-        for command in ("ls -la", "git status", "pytest -q", "cat README.md | head", "rmdir vazio"):
+        for command in ("ls -la", "git status", "pytest -q", "cat README.md | head", "rmdir empty"):
             self.assertIsNone(self.run_hook("bash-gate", self.bash(command)), command)
         self.assertEqual(self.gateway.requests, [])
 
     def test_bash_gate_asks_when_jev_flags_risk(self):
-        self.gateway.replies.append((200, choice("risco", "destrutivo", 0.93)))
+        self.gateway.replies.append((200, choice("risk", "destructive", 0.93)))
         out = self.run_hook("bash-gate", self.bash("rm -rf build/ && git push --force origin main"))
         path, body = self.gateway.requests[0]
         self.assertEqual(path, "/master/decide")
         self.assertEqual(set(body), {"state", "questions"})
-        self.assertEqual(body["state"]["comando"], "rm -rf build/ && git push --force origin main")
-        self.assertEqual(body["questions"]["risco"]["type"], "choice")
-        self.assertEqual(set(body["questions"]["risco"]["criteria"]), {"rotina", "confirmar", "destrutivo"})
+        self.assertEqual(body["state"]["command"], "rm -rf build/ && git push --force origin main")
+        self.assertEqual(body["questions"]["risk"]["type"], "choice")
+        self.assertEqual(set(body["questions"]["risk"]["criteria"]), {"routine", "confirm", "destructive"})
         decision = out["hookSpecificOutput"]
         self.assertEqual(decision["permissionDecision"], "ask")
-        self.assertIn("destrutivo", decision["permissionDecisionReason"])
+        self.assertIn("destructive", decision["permissionDecisionReason"])
         self.assertIn("🔷", out["systemMessage"])
 
     def test_bash_gate_routine_verdict_and_low_confidence_only_inform(self):
-        self.gateway.replies.append((200, choice("risco", "rotina", 0.88)))
+        self.gateway.replies.append((200, choice("risk", "routine", 0.88)))
         out = self.run_hook("bash-gate", self.bash("rm -rf node_modules"))
         self.assertNotIn("hookSpecificOutput", out)
-        self.assertIn("rotina", out["systemMessage"])
-        self.gateway.replies.append((200, choice("risco", None, 0.4, status="abstain")))
+        self.assertIn("routine", out["systemMessage"])
+        self.gateway.replies.append((200, choice("risk", None, 0.4, status="abstain")))
         out = self.run_hook("bash-gate", self.bash("sudo rm -rf /opt/x"))
         self.assertNotIn("hookSpecificOutput", out)
-        self.assertIn("sem decisão", out["systemMessage"])
+        self.assertIn("no decision", out["systemMessage"])
 
     def test_bash_gate_fails_open_on_error_and_unreachable_gateway(self):
         self.gateway.replies.append((400, {"status": "fallback", "reason": "invalid_workflow"}))
@@ -116,8 +116,8 @@ class DecisionHookTests(unittest.TestCase):
         out = self.run_hook("bash-gate", self.bash("git reset --hard HEAD~3"))
         self.assertNotIn("hookSpecificOutput", out or {})
 
-    # --- Verificação no Stop -------------------------------------------------------------------
-    def turn(self, *tools, prompt="Corrija o bug"):
+    # --- Stop check --------------------------------------------------------------------------------
+    def turn(self, *tools, prompt="Fix the bug"):
         entries = [{"type": "user", "message": {"role": "user", "content": prompt}}]
         for name, tool_input in tools:
             entries.append({"type": "assistant", "message": {"role": "assistant", "content": [
@@ -126,7 +126,7 @@ class DecisionHookTests(unittest.TestCase):
 
     def stop(self, transcript, active=False, session="s1"):
         return {"hook_event_name": "Stop", "session_id": session, "stop_hook_active": active,
-                "transcript_path": transcript, "last_assistant_message": "Pronto, corrigi o bug."}
+                "transcript_path": transcript, "last_assistant_message": "Done, I fixed the bug."}
 
     def test_stop_check_consults_only_after_unverified_edits(self):
         self.assertIsNone(self.run_hook("stop-check", self.stop(self.turn(("Read", {"file_path": "a"})))))
@@ -139,26 +139,26 @@ class DecisionHookTests(unittest.TestCase):
     def test_stop_check_gives_feedback_at_most_three_times(self):
         edited = self.turn(("Edit", {"file_path": "a.py"}), ("Bash", {"command": "ls"}))
         for _ in range(4):
-            self.gateway.replies.append((200, choice("conclusao", "concluida_sem_verificacao", 0.9)))
+            self.gateway.replies.append((200, choice("completion", "done_unverified", 0.9)))
         outputs = [self.run_hook("stop-check", self.stop(edited)) for _ in range(4)]
         _, body = self.gateway.requests[0]
-        self.assertEqual(body["state"]["arquivos_editados"], ["a.py"])
-        self.assertIn("concluida_sem_verificacao", body["questions"]["conclusao"]["criteria"])
+        self.assertEqual(body["state"]["edited_files"], ["a.py"])
+        self.assertIn("done_unverified", body["questions"]["completion"]["criteria"])
         for out in outputs[:3]:
-            self.assertIn("verifi", out["hookSpecificOutput"]["additionalContext"])
+            self.assertIn("verif", out["hookSpecificOutput"]["additionalContext"])
             self.assertNotIn("decision", out)
         self.assertIsNone(outputs[3])
         self.assertEqual(len(self.gateway.requests), 3)
 
     def test_stop_check_accepts_verified_verdict(self):
-        self.gateway.replies.append((200, choice("conclusao", "concluida_verificada", 0.9)))
+        self.gateway.replies.append((200, choice("completion", "done_verified", 0.9)))
         out = self.run_hook("stop-check", self.stop(self.turn(("Write", {"file_path": "b.md"}))))
         self.assertNotIn("hookSpecificOutput", out)
         self.assertIn("🔷", out["systemMessage"])
 
-    # --- Compactação ---------------------------------------------------------------------------
+    # --- Compaction ----------------------------------------------------------------------------
     def test_precompact_selects_items_and_session_start_reinjects_them(self):
-        prompts = ["Fale comigo em pt-br", "ok", "Não faça push sem me perguntar", "leia o README"]
+        prompts = ["Talk to me in English", "ok", "Don't push without asking me", "read the README"]
         transcript = self.transcript([{"type": "user", "message": {"role": "user", "content": p}} for p in prompts])
         self.gateway.replies.append((200, {"status": "ok", "answers": {
             "u0": {"type": "noul", "status": "ok", "noul": 0.92},
@@ -168,41 +168,41 @@ class DecisionHookTests(unittest.TestCase):
                                            "transcript_path": transcript, "trigger": "auto"})
         self.assertIsNone(out)
         _, body = self.gateway.requests[0]
-        self.assertEqual([body["state"]["itens"][k] for k in ("u0", "u1", "u2")],
-                         ["Fale comigo em pt-br", "Não faça push sem me perguntar", "leia o README"])
+        self.assertEqual([body["state"]["items"][k] for k in ("u0", "u1", "u2")],
+                         ["Talk to me in English", "Don't push without asking me", "read the README"])
         self.assertTrue(all(q["type"] == "noul" for q in body["questions"].values()))
         start = self.run_hook("hook", {"hook_event_name": "SessionStart", "source": "compact", "session_id": "s9"})
         context = start["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("Fale comigo em pt-br", context)
-        self.assertIn("Não faça push sem me perguntar", context)
-        self.assertNotIn("leia o README", context)
-        self.assertIn("solicitar_decisao", context)
+        self.assertIn("Talk to me in English", context)
+        self.assertIn("Don't push without asking me", context)
+        self.assertNotIn("read the README", context)
+        self.assertIn("request_decision", context)
         other = self.run_hook("hook", {"hook_event_name": "SessionStart", "source": "startup", "session_id": "s9"})
-        self.assertNotIn("Fale comigo", other["hookSpecificOutput"]["additionalContext"])
+        self.assertNotIn("Talk to me", other["hookSpecificOutput"]["additionalContext"])
 
     def test_precompact_failure_never_blocks(self):
         self.configure("http://127.0.0.1:9")
-        transcript = self.transcript([{"type": "user", "message": {"role": "user", "content": "Regra longa x"}}])
+        transcript = self.transcript([{"type": "user", "message": {"role": "user", "content": "Long rule x"}}])
         self.assertIsNone(self.run_hook("precompact", {"hook_event_name": "PreCompact", "session_id": "s8",
                                                         "transcript_path": transcript, "trigger": "manual"}))
 
-    # --- Detector de desvio --------------------------------------------------------------------
+    # --- Drift detector ----------------------------------------------------------------------------
     def test_drift_consults_every_fifteen_tool_calls(self):
         transcript = self.turn(*[("Read", {"file_path": f"f{i}"}) for i in range(15)])
         event = {"hook_event_name": "PostToolUse", "tool_name": "Read", "session_id": "s2",
                  "transcript_path": transcript, "tool_input": {}}
-        self.gateway.replies.append((200, choice("rumo", "travado", 0.8)))
+        self.gateway.replies.append((200, choice("direction", "stuck", 0.8)))
         outputs = [self.run_hook("drift", event) for _ in range(15)]
         self.assertTrue(all(out is None for out in outputs[:14]))
         self.assertEqual(len(self.gateway.requests), 1)
         _, body = self.gateway.requests[0]
-        self.assertEqual(body["state"]["pedido"], "Corrija o bug")
-        self.assertEqual(len(body["state"]["ultimas_acoes"]), 15)
-        self.assertIn("travado", outputs[14]["hookSpecificOutput"]["additionalContext"])
-        self.gateway.replies.append((200, choice("rumo", "no_rumo", 0.9)))
+        self.assertEqual(body["state"]["request"], "Fix the bug")
+        self.assertEqual(len(body["state"]["recent_actions"]), 15)
+        self.assertIn("stuck", outputs[14]["hookSpecificOutput"]["additionalContext"])
+        self.gateway.replies.append((200, choice("direction", "on_track", 0.9)))
         outputs = [self.run_hook("drift", event) for _ in range(15)]
         self.assertNotIn("hookSpecificOutput", outputs[14])
-        self.assertIn("no_rumo", outputs[14]["systemMessage"])
+        self.assertIn("on_track", outputs[14]["systemMessage"])
 
 
 if __name__ == "__main__":

@@ -5,11 +5,11 @@ import { createApp } from "../src/app.js";
 import { fakeUpstream, testConfig, settled } from "./helpers.js";
 import { createEventLog } from "../src/events.js";
 
-const gate = { type: "choice", instructions: "Há evidência suficiente?", criteria: { yes: "Sim", no: "Não" } };
-const score = { type: "score", instructions: "Qualidade nesta dimensão", criteria: ["baixa", "média", "alta"] };
-const chain = { state: { evidence: "exemplo" }, stages: [
+const gate = { type: "choice", instructions: "Is there enough evidence?", criteria: { yes: "Yes", no: "No" } };
+const score = { type: "score", instructions: "Quality on this dimension", criteria: ["low", "medium", "high"] };
+const chain = { state: { evidence: "example" }, stages: [
   { id: "gate", questions: { enough: gate } },
-  { id: "evaluate", when: { question: "enough", equals: "yes" }, questions: { logic: score, support: score, risk: { type: "noul", instructions: "Há erro?" } } },
+  { id: "evaluate", when: { question: "enough", equals: "yes" }, questions: { logic: score, support: score, risk: { type: "noul", instructions: "Is there an error?" } } },
 ], composite: { logic: 0.4, support: 0.6 }, cascade: { questions: ["risk"], accept_below: 0.2, escalate_at: 0.8 } };
 function fake(yes = "yes", confidence = 0.9, risk = 0.2) {
   const calls: any[] = [];
@@ -115,5 +115,5 @@ it("serves workflows directly and inline without forwarding internal fields", as
   expect(up.calls[0]!.body.input).toContain('"value":0.7');
   const feed = events.since(0);
   expect(feed[0]!.context?.workflow?.composite?.value).toBe(0.7);
-  expect(JSON.stringify(feed)).not.toContain('"evidence":"exemplo"');
+  expect(JSON.stringify(feed)).not.toContain('"evidence":"example"');
 });

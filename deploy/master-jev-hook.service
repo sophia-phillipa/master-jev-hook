@@ -1,6 +1,6 @@
-# Modelo do serviço do gateway Master-JEV Hook (systemd --user).
-# Instalar: substituir @REPO@ (checkout absoluto) e @NODE@ (node >= 22.15 absoluto) e copiar
-# para ~/.config/systemd/user/. Ver o README, seção do serviço do gateway.
+# Template for the Master-JEV Hook gateway service (systemd --user).
+# To install: replace @REPO@ (absolute checkout path) and @NODE@ (absolute node >= 22.15) and copy
+# to ~/.config/systemd/user/. See the README, gateway service section.
 [Unit]
 Description=Master-JEV Hook gateway
 After=network-online.target

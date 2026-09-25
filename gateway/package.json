@@ -1,7 +1,7 @@
 {
   "name": "master-jev-hook",
   "version": "0.1.0",
-  "description": "Gateway do Master-JEV Hook: decisões do JEV via MCP e HTTP, roteamento de ferramentas para clientes LLM e painel local",
+  "description": "Master-JEV Hook gateway: JEV decisions via MCP and HTTP, tool routing for LLM clients, and a local dashboard",
   "keywords": [
     "llm",
     "gateway",

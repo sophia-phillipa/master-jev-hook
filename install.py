@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Instala o MCP master-jev-hook no Claude Code, no Claude Desktop e no Codex,
-além dos hooks do Claude Code e das instruções de orquestração."""
+"""Installs the master-jev-hook MCP server in Claude Code, Claude Desktop and Codex,
+plus the Claude Code hooks and the orchestration instructions."""
 import argparse
 import io
 import json
@@ -24,16 +24,16 @@ CODEX_BEGIN, CODEX_END = "<!-- master-jev-hook:begin -->", "<!-- master-jev-hook
 TOML_BEGIN, TOML_END = "# master-jev-hook:begin", "# master-jev-hook:end"
 TARGETS = ("claude-code", "claude-desktop", "codex")
 JEV_TOOLS = "mcp__" + NAME + "__.*"
-# (evento, matcher, modo do claude_jev.py, statusMessage, timeout em s): instruções na sessão, lembrete
-# da regra a cada mensagem, aviso visível antes/depois de cada ferramenta JEV do MCP e pontos de
-# decisão que consultam o gateway (sempre fail-open).
-HOOKS = (("SessionStart", "startup|resume|clear|compact|fork", "hook", "Master-JEV Hook: instruções Claude", 3),
+# (event, matcher, claude_jev.py mode, statusMessage, timeout in s): session instructions, a
+# reminder of the rule on every message, a visible notice before/after each JEV MCP tool call, and
+# decision points that consult the gateway (always fail-open).
+HOOKS = (("SessionStart", "startup|resume|clear|compact|fork", "hook", "Master-JEV Hook: Claude instructions", 3),
          ("UserPromptSubmit", None, "prompt", None, 3),
-         ("PreToolUse", JEV_TOOLS, "pre", "🔷 Consultando JEV…", 3),
+         ("PreToolUse", JEV_TOOLS, "pre", "🔷 Consulting JEV…", 3),
          ("PostToolUse", JEV_TOOLS, "post", None, 3),
-         ("PreToolUse", "Bash", "bash-gate", "🔷 JEV avaliando o comando…", 8),
-         ("Stop", None, "stop-check", "🔷 JEV verificando a conclusão…", 10),
-         ("PreCompact", None, "precompact", "🔷 JEV escolhendo o que preservar…", 12),
+         ("PreToolUse", "Bash", "bash-gate", "🔷 JEV evaluating the command…", 8),
+         ("Stop", None, "stop-check", "🔷 JEV verifying completion…", 10),
+         ("PreCompact", None, "precompact", "🔷 JEV choosing what to preserve…", 12),
          ("PostToolUse", None, "drift", None, 8))
 MANAGED = "<!-- master-jev-hook-claude:managed -->"
 
@@ -51,9 +51,9 @@ def skill_zip(raw):
 
 def safe_target(path):
     if any(p.is_symlink() for p in (path, *path.parents)):
-        raise ValueError("Destino com symlink: " + str(path))
+        raise ValueError("Target has a symlink: " + str(path))
     if path.exists() and not path.is_file():
-        raise ValueError("Destino não é arquivo: " + str(path))
+        raise ValueError("Target is not a file: " + str(path))
 
 
 def atomic_write(path, raw, mode=0o600):
@@ -71,9 +71,9 @@ def atomic_write(path, raw, mode=0o600):
 def absolute(value):
     path = Path(value).expanduser()
     if not path.is_absolute():
-        raise ValueError("Use um caminho absoluto: " + str(path))
-    # Algumas distribuições expõem a home do usuário por um symlink. Normaliza
-    # esse prefixo conhecido; safe_target continua recusando links dentro dele.
+        raise ValueError("Use an absolute path: " + str(path))
+    # Some distributions expose the user's home directory through a symlink. Normalize
+    # that known prefix; safe_target still refuses links inside it.
     user_home = Path.home()
     if path.is_relative_to(user_home):
         path = user_home.resolve() / path.relative_to(user_home)
@@ -82,22 +82,22 @@ def absolute(value):
 
 def validate_platform():
     if sys.version_info < (3, 11):
-        raise ValueError("Python 3.11+ é necessário")
+        raise ValueError("Python 3.11+ is required")
     if sys.platform == "win32" and sys.version_info < (3, 13):
-        raise ValueError("Windows nativo requer Python 3.13+ (os.fchmod)")
+        raise ValueError("Native Windows requires Python 3.13+ (os.fchmod)")
 
 
 def validate_node(node):
     if not node.is_file() or not os.access(node, os.X_OK):
-        raise ValueError("Node não encontrado ou não executável")
+        raise ValueError("Node not found or not executable")
     try:
         version = subprocess.run([str(node), "--version"], capture_output=True, text=True,
                                  check=True, timeout=5).stdout.strip()
         major, minor, *_ = (int(part) for part in version.removeprefix("v").split("."))
     except (OSError, ValueError, subprocess.SubprocessError):
-        raise ValueError("Não foi possível validar Node") from None
+        raise ValueError("Could not validate Node") from None
     if (major, minor) < (22, 15):
-        raise ValueError("Node >=22.15 é necessário")
+        raise ValueError("Node >=22.15 is required")
 
 
 def validate_gateway_url(value):
@@ -110,11 +110,11 @@ def validate_gateway_url(value):
     except ValueError:
         valid = False
     if not valid:
-        raise ValueError("URL do gateway inválida; use http(s)://host:porta")
+        raise ValueError("Invalid gateway URL; use http(s)://host:port")
 
 
 def stale_hook(command, current):
-    """Hook claude_jev.py de uma instalação anterior (outro prefixo, outro Python ou modo removido)."""
+    """A claude_jev.py hook from a previous installation (different prefix, different Python, or a removed mode)."""
     if not isinstance(command, str) or command in current:
         return False
     try:
@@ -147,7 +147,7 @@ def mcp_config(data, node, script, gateway_url, path):
     if not isinstance(old, dict):
         raise ValueError("invalid_mcp_server: " + str(path))
     if "url" in old or old.get("type", "stdio") != "stdio" or old.get("transport", "stdio") != "stdio":
-        raise ValueError("Conflito MCP: servidor existente usa outro transporte em " + str(path))
+        raise ValueError("MCP conflict: existing server uses a different transport in " + str(path))
     env = old.get("env", {})
     if not isinstance(env, dict):
         raise ValueError("invalid_mcp_env: " + str(path))
@@ -169,17 +169,17 @@ def managed_memory(old, guide, begin=BEGIN, end=END):
 
 
 def codex_config(old, node, script, gateway_url, path):
-    """config.toml com o servidor MCP num bloco delimitado; recusa definição dele fora do bloco."""
+    """config.toml with the MCP server in a delimited block; refuses a definition of it outside the block."""
     outside = managed_memory(old, "", TOML_BEGIN, TOML_END)
     if NAME in tomllib.loads(outside).get("mcp_servers", {}):
-        raise ValueError(f"Conflito MCP: [mcp_servers.{NAME}] já definido fora do bloco {TOML_BEGIN} em {path}")
+        raise ValueError(f"MCP conflict: [mcp_servers.{NAME}] already defined outside the {TOML_BEGIN} block in {path}")
     expected = {"command": str(node), "args": [str(script)], "env": {"MASTER_JEV_GATEWAY_URL": gateway_url}}
-    q = lambda value: json.dumps(value, ensure_ascii=False)  # Strings JSON são strings básicas TOML válidas.
+    q = lambda value: json.dumps(value, ensure_ascii=False)  # JSON strings are valid TOML basic strings.
     block = (f"[mcp_servers.{NAME}]\ncommand = {q(str(node))}\nargs = [{q(str(script))}]\n"
              f"env = {{ MASTER_JEV_GATEWAY_URL = {q(gateway_url)} }}")
     new = managed_memory(old, block, TOML_BEGIN, TOML_END)
     if tomllib.loads(new).get("mcp_servers", {}).get(NAME) != expected:
-        raise ValueError("invalid_config: o bloco master-jev-hook ficaria inválido em " + str(path))
+        raise ValueError("invalid_config: the master-jev-hook block would become invalid in " + str(path))
     return new.encode("utf-8")
 
 
@@ -201,7 +201,7 @@ def plan(targets, home, prefix, node, code_config, desktop_config, codex_home, g
         destinations.extend((codex_toml, codex_agents))
     normalized = [os.path.normpath(str(path)) for path in destinations]
     if len(normalized) != len(set(normalized)):
-        raise ValueError("Caminhos de destino coincidem")
+        raise ValueError("Destination paths collide")
     guide = (ROOT / "master-jev-hook-claude.md").read_text(encoding="utf-8")
     changes = {script: (ROOT / "gateway/bin/master-jev-mcp.mjs").read_bytes(),
                helper: (ROOT / "claude_jev.py").read_bytes(), guide_path: guide.encode("utf-8"),
@@ -216,7 +216,7 @@ def plan(targets, home, prefix, node, code_config, desktop_config, codex_home, g
             raise ValueError("invalid_settings")
         python = str(Path(sys.executable).resolve())
         current = {" ".join(map(shlex.quote, (python, str(helper), mode))) for _, _, mode, _, _ in HOOKS}
-        for groups in settings.get("hooks", {}).values():  # Remove hooks de instalações anteriores.
+        for groups in settings.get("hooks", {}).values():  # Remove hooks from previous installations.
             if not isinstance(groups, list):
                 continue
             for group in groups:
@@ -236,7 +236,7 @@ def plan(targets, home, prefix, node, code_config, desktop_config, codex_home, g
             if not existing:
                 groups.append(group)
             elif len(groups[existing[0]].get("hooks", [])) == 1:
-                groups[existing[0]] = group  # Grupo só nosso: atualiza matcher, timeout e status.
+                groups[existing[0]] = group  # Group is ours alone: update matcher, timeout and status.
         changes[settings_path] = (json.dumps(settings, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
         memory = home / "CLAUDE.md"
         safe_target(memory)
@@ -245,7 +245,7 @@ def plan(targets, home, prefix, node, code_config, desktop_config, codex_home, g
         changes[code_config] = mcp_config(read_json(code_config), node, script, gateway_url, code_config)
         safe_target(skill_path)
         if skill_path.exists() and MANAGED not in skill_path.read_text(encoding="utf-8"):
-            raise ValueError("Arquivo existente não gerenciado: " + str(skill_path))
+            raise ValueError("Existing file is not managed: " + str(skill_path))
         changes[skill_path] = skill
     if "claude-desktop" in targets:
         changes[desktop_config] = mcp_config(read_json(desktop_config), node, script, gateway_url, desktop_config)
@@ -333,9 +333,9 @@ def install(home, prefix, target="all", code_config=None, desktop_config=None,
     if target == "all":
         targets = [t for t in TARGETS if present(t, home, code_config, desktop_config, codex_home)]
         for skipped in (t for t in TARGETS if t not in targets):
-            print(f"Aviso: {skipped} não encontrado nesta máquina; pulando.", file=sys.stderr)
+            print(f"Warning: {skipped} not found on this machine; skipping.", file=sys.stderr)
     if not targets:
-        raise ValueError("Nenhum cliente encontrado; use --target para instalar mesmo assim")
+        raise ValueError("No client found; use --target to install anyway")
     changes = plan(targets, home, prefix, node, code_config, desktop_config, codex_home, gateway_url)
     return (list(changes), None) if dry_run else (list(changes), apply(changes, prefix))
 
@@ -357,19 +357,19 @@ def main():
         paths, backup = install(args.claude_home, args.prefix, args.target, args.code_config,
                                 args.desktop_config, args.node, args.gateway_url, args.dry_run, args.codex_home)
     except (OSError, ValueError) as error:
-        parser.exit(1, "Instalação interrompida: " + str(error) + "\n")
-    print("Plano validado" if args.dry_run else "Master-JEV Hook instalado")
+        parser.exit(1, "Installation aborted: " + str(error) + "\n")
+    print("Plan validated" if args.dry_run else "Master-JEV Hook installed")
     for path in paths:
         print(path)
     if backup:
         print("Backup:", backup)
     desktop_config = absolute(args.desktop_config or desktop_default())
-    if desktop_config in paths:  # Só imprime se o Desktop está entre os alvos efetivamente instalados.
-        print("Claude Desktop: recarregue o aplicativo. Para o modo Chat usar o JEV sempre,",
-              "cole nas instruções do app/projeto o texto de", args.prefix / "master-jev-hook-claude-chat.md",
-              "e envie a skill", args.prefix / "master-jev-hook-skill.zip", "em Configurações → Capabilities → Skills.")
+    if desktop_config in paths:  # Only print if Desktop is among the targets actually installed.
+        print("Claude Desktop: reload the app. For Chat mode to always use the JEV,",
+              "paste into the app/project instructions the text from", args.prefix / "master-jev-hook-claude-chat.md",
+              "and upload the skill", args.prefix / "master-jev-hook-skill.zip", "under Settings -> Capabilities -> Skills.")
     if not args.dry_run:
-        print("Reinicie os clientes para carregar o MCP. O gateway HTTP deve estar disponível em", args.gateway_url)
+        print("Restart the clients to load the MCP server. The HTTP gateway must be available at", args.gateway_url)
 
 
 if __name__ == "__main__":

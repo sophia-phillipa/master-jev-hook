@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -426,7 +426,7 @@ const store = (name, value) => { try { localStorage.setItem(name, value); } catc
 const view = {
   client: "all",
   outcome: "all",
-  lang: stored("master-jev-dashboard-lang") === "en" ? "en" : "pt-BR",
+  lang: stored("master-jev-dashboard-lang") === "pt-BR" ? "pt-BR" : "en",
   theme: ["light", "dark"].includes(stored("master-jev-dashboard-theme")) ? stored("master-jev-dashboard-theme") : undefined,
   open: new Set(),
   limit: PAGE_ROWS,
@@ -557,7 +557,7 @@ function renderControls() {
   $("clients").setAttribute("aria-label", tr.client);
   $("clients").replaceChildren(...["all", ...clients].map((name) => segButton(name === "all" ? tr.allClients : name, view.client === name, tr.clientTitle(name === "all" ? tr.allClients : name), () => { view.client = name; view.limit = PAGE_ROWS; })));
   $("langs").setAttribute("aria-label", tr.language);
-  $("langs").replaceChildren(...[["pt-BR", "PT-BR"], ["en", "EN"]].map(([lang, label]) => segButton(label, view.lang === lang, tr.langTitle, () => { view.lang = lang; store("master-jev-dashboard-lang", lang); })));
+  $("langs").replaceChildren(...[["en", "EN"], ["pt-BR", "PT-BR"]].map(([lang, label]) => segButton(label, view.lang === lang, tr.langTitle, () => { view.lang = lang; store("master-jev-dashboard-lang", lang); })));
   $("themes").setAttribute("aria-label", tr.theme);
   $("themes").replaceChildren(...[["light", tr.light], ["dark", tr.dark]].map(([theme, label]) => segButton(label, effectiveTheme() === theme, tr.themeTitle, () => { view.theme = theme; store("master-jev-dashboard-theme", theme); applyTheme(); })));
   $("rows-switch").setAttribute("aria-checked", String(view.rows));
@@ -753,7 +753,7 @@ function detail(event) {
   const byId = Object.fromEntries(answers(event).map((a) => [a.id, a]));
   const questions = context?.questions?.length ? context.questions
     : event.jev ? [{ id: "tool", type: "choice", instructions: "", options: event.jev.shortlist ?? [] }] : [];
-  const PLACEHOLDER = /texto mantido fora do painel/i;
+  const PLACEHOLDER = /text kept out of the dashboard/i;
   return h("div", {},
     h("dl", { class: "kv" }, ...rows.flatMap(([label, ...value]) => [h("dt", {}, label), h("dd", {}, ...value)])),
     questions.length && h("h3", {}, tr.dQuestions),

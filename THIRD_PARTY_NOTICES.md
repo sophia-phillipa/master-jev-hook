@@ -1,14 +1,14 @@
-# Avisos de terceiros
+# Third-party notices
 
-O Master-JEV Hook é um projeto próprio. Partes do código em `gateway/`
-foram inicialmente baseadas no projeto [jev-gateway](https://github.com/vinilana/jev-gateway),
-de Vinicius Lana, no commit `a197836755671fc224cc3d7f91a8592d56ca665c` (versão 0.4.1),
-distribuído sob a licença MIT. Desde então o código foi amplamente modificado e
-estendido; as funcionalidades e os resultados deste projeto não devem ser
-atribuídos ao projeto original.
+Master-JEV Hook is an original project. Parts of the code under `gateway/`
+were initially based on the [jev-gateway](https://github.com/vinilana/jev-gateway)
+project, by Vinicius Lana, at commit `a197836755671fc224cc3d7f91a8592d56ca665c`
+(version 0.4.1), distributed under the MIT license. Since then the code has
+been extensively modified and extended; this project's features and results
+should not be attributed to the original project.
 
-Conforme exige a licença MIT, o aviso de copyright e de permissão original é
-reproduzido abaixo e se aplica às partes derivadas daquele código.
+As the MIT license requires, the original copyright and permission notice is
+reproduced below and applies to the parts derived from that code.
 
 ## jev-gateway
 

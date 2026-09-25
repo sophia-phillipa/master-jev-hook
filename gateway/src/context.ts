@@ -70,7 +70,7 @@ export function parseDecisionContext(value: unknown): DecisionContext | undefine
 function labeledCandidates(input: RouterInput): DecisionContext["candidates"] {
   const last = input.turns.findLast((t) => t.role === "user");
   if (typeof last?.text !== "string") return undefined;
-  const matches = [...last.text.matchAll(/^(?:Argumento\s+|Argument\s+)?([A-Z]):\s*(.+)$/gm)];
+  const matches = [...last.text.matchAll(/^(?:Argument\s+)?([A-Z]):\s*(.+)$/gm)];
   if (matches.length < 2 || matches.length > 32 || new Set(matches.map((m) => m[1])).size !== matches.length) return undefined;
   return matches.map((m) => ({ id: m[1]!, text: m[2]! }));
 }
@@ -206,7 +206,7 @@ export async function assessWorkflow(raw: unknown, config: Config, ask: AskJev, 
     calls: workflow.calls, inputTokens: workflow.inputTokens, outputTokens: workflow.outputTokens, latencyMs: workflow.latencyMs,
     inspection, reason: workflow.reason, assessments: {}, workflow,
     questions: plan.stages.flatMap((s) => Object.entries(s.questions).map(([id, q]) => ({
-      id, type: q.type, instructions: "Pergunta definida pelo harness; texto mantido fora do painel.",
+      id, type: q.type, instructions: "Question defined by the harness; text kept out of the dashboard.",
       options: q.type === "choice" ? [...Object.keys(q.criteria ?? {}), "abstain"] : q.type === "score" ? (q.criteria as string[]).map((_, i) => String(i)) : [],
     }))),
   };

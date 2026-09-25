@@ -13,13 +13,12 @@ const isId = (x) => typeof x === "string" && idPattern.test(x);
 const isText = (x, max = 8000) => typeof x === "string" && x.length >= 1 && x.length <= max;
 const isPlainObject = (x) => !!x && typeof x === "object" && !Array.isArray(x);
 const onlyKeys = (obj, keys) => isPlainObject(obj) && Object.keys(obj).every((k) => keys.includes(k));
-// Riscos da ação que a resposta vai orientar; o gateway aplica limiares crescentes (0,65/0,80/0,90).
-const RISCOS = { baixo: "low", medio: "medium", alto: "high" };
-const risco = { type: "string", enum: Object.keys(RISCOS), description: "Risco da ação que a resposta vai orientar: baixo (leitura, triagem), medio (mudança de código reversível), alto (irreversível, externo, segurança). Define a confiança mínima exigida." };
+// Risk of the action the response will guide; the gateway applies increasing thresholds (0.65/0.80/0.90).
+const risk = { type: "string", enum: ["low", "medium", "high"], description: "Risk of the action the response will guide: low (read-only, triage), medium (reversible code change), high (irreversible, external, security). Defines the minimum confidence required." };
 function withRisk(body, args) {
-  if (args.risco === undefined) return body;
-  if (!Object.hasOwn(RISCOS, args.risco)) invalid("Invalid risco: expected baixo, medio or alto");
-  return { ...body, risk: RISCOS[args.risco] };
+  if (args.risk === undefined) return body;
+  if (!["low", "medium", "high"].includes(args.risk)) invalid("Invalid risk: expected low, medium or high");
+  return { ...body, risk: args.risk };
 }
 function invalid(message) { const e = new Error(message); e.code = -32602; throw e; }
 function parseItem(x) {
@@ -34,79 +33,79 @@ function parseItems(arr, min, max) {
   return arr;
 }
 
-function buildClassificar(args) {
-  if (!onlyKeys(args, ["finalidade", "categorias", "itens", "risco"])) invalid("Invalid arguments for jev_classificar");
-  if (args.finalidade !== undefined && !isText(args.finalidade)) invalid("Invalid finalidade");
-  const categorias = parseItems(args.categorias, 2, 64);
-  const itens = parseItems(args.itens, 1, 32);
-  const criteria = Object.fromEntries(categorias.map((c) => [c.id, c.text]));
-  const questions = Object.fromEntries(itens.map((it) => [it.id, {
+function buildClassify(args) {
+  if (!onlyKeys(args, ["purpose", "categories", "items", "risk"])) invalid("Invalid arguments for jev_classify");
+  if (args.purpose !== undefined && !isText(args.purpose)) invalid("Invalid purpose");
+  const categories = parseItems(args.categories, 2, 64);
+  const items = parseItems(args.items, 1, 32);
+  const criteria = Object.fromEntries(categories.map((c) => [c.id, c.text]));
+  const questions = Object.fromEntries(items.map((it) => [it.id, {
     type: "choice",
-    instructions: `Classify the item in \`itens.${it.id}\` into the best-fitting category.` + (args.finalidade !== undefined ? ` Purpose (see \`finalidade\`): ${args.finalidade}.` : ""),
+    instructions: `Classify the item in \`items.${it.id}\` into the best-fitting category.` + (args.purpose !== undefined ? ` Purpose (see \`purpose\`): ${args.purpose}.` : ""),
     criteria,
   }]));
-  const state = { ...(args.finalidade !== undefined ? { finalidade: args.finalidade } : {}), itens: Object.fromEntries(itens.map((it) => [it.id, it.text])) };
+  const state = { ...(args.purpose !== undefined ? { purpose: args.purpose } : {}), items: Object.fromEntries(items.map((it) => [it.id, it.text])) };
   return withRisk({ state, questions }, args);
 }
 
-function buildVerificar(args) {
-  if (!onlyKeys(args, ["pergunta", "estado", "criterios", "risco"])) invalid("Invalid arguments for jev_verificar");
-  if (!isText(args.pergunta)) invalid("Invalid pergunta");
-  if (!isText(args.estado)) invalid("Invalid estado");
+function buildVerify(args) {
+  if (!onlyKeys(args, ["question", "state", "criteria", "risk"])) invalid("Invalid arguments for jev_verify");
+  if (!isText(args.question)) invalid("Invalid question");
+  if (!isText(args.state)) invalid("Invalid state");
   let criteria;
-  if (args.criterios !== undefined) {
-    if (!isPlainObject(args.criterios) || Object.keys(args.criterios).length !== 2 || !isText(args.criterios.true) || !isText(args.criterios.false)) invalid("Invalid criterios: expected { true, false }");
-    criteria = { true: args.criterios.true, false: args.criterios.false };
+  if (args.criteria !== undefined) {
+    if (!isPlainObject(args.criteria) || Object.keys(args.criteria).length !== 2 || !isText(args.criteria.true) || !isText(args.criteria.false)) invalid("Invalid criteria: expected { true, false }");
+    criteria = { true: args.criteria.true, false: args.criteria.false };
   }
-  return withRisk({ state: args.estado, questions: { verificacao: { type: "noul", instructions: args.pergunta, ...(criteria ? { criteria } : {}) } } }, args);
+  return withRisk({ state: args.state, questions: { verification: { type: "noul", instructions: args.question, ...(criteria ? { criteria } : {}) } } }, args);
 }
 
-function buildPontuar(args) {
-  if (!onlyKeys(args, ["estado", "criterios", "pesos", "risco"])) invalid("Invalid arguments for jev_pontuar");
-  if (!isText(args.estado)) invalid("Invalid estado");
-  if (!Array.isArray(args.criterios) || args.criterios.length < 1 || args.criterios.length > 32) invalid("Invalid criterios: expected between 1 and 32 entries");
+function buildScore(args) {
+  if (!onlyKeys(args, ["state", "criteria", "weights", "risk"])) invalid("Invalid arguments for jev_score");
+  if (!isText(args.state)) invalid("Invalid state");
+  if (!Array.isArray(args.criteria) || args.criteria.length < 1 || args.criteria.length > 32) invalid("Invalid criteria: expected between 1 and 32 entries");
   const ids = [];
   const questions = {};
-  for (const c of args.criterios) {
-    if (!isPlainObject(c) || Object.keys(c).length !== 3 || !isId(c.id) || !isText(c.pergunta) || !Array.isArray(c.niveis) || c.niveis.length < 2 || c.niveis.length > 10 || !c.niveis.every((n) => isText(n))) invalid("Invalid criterio: expected { id, pergunta, niveis }");
-    if (ids.includes(c.id)) invalid("Duplicate criterio id");
+  for (const c of args.criteria) {
+    if (!isPlainObject(c) || Object.keys(c).length !== 3 || !isId(c.id) || !isText(c.question) || !Array.isArray(c.levels) || c.levels.length < 2 || c.levels.length > 10 || !c.levels.every((n) => isText(n))) invalid("Invalid criterion: expected { id, question, levels }");
+    if (ids.includes(c.id)) invalid("Duplicate criterion id");
     ids.push(c.id);
-    questions[c.id] = { type: "score", instructions: c.pergunta, criteria: c.niveis };
+    questions[c.id] = { type: "score", instructions: c.question, criteria: c.levels };
   }
   let composite;
-  if (args.pesos !== undefined) {
-    if (!isPlainObject(args.pesos) || Object.keys(args.pesos).length === 0) invalid("Invalid pesos");
-    for (const [k, v] of Object.entries(args.pesos)) {
-      if (!ids.includes(k)) invalid(`Peso references unknown criterio id "${k}"`);
-      if (typeof v !== "number" || !Number.isFinite(v)) invalid("Invalid peso value");
+  if (args.weights !== undefined) {
+    if (!isPlainObject(args.weights) || Object.keys(args.weights).length === 0) invalid("Invalid weights");
+    for (const [k, v] of Object.entries(args.weights)) {
+      if (!ids.includes(k)) invalid(`Weight references unknown criterion id "${k}"`);
+      if (typeof v !== "number" || !Number.isFinite(v)) invalid("Invalid weight value");
     }
-    composite = args.pesos;
+    composite = args.weights;
   }
-  return withRisk({ state: args.estado, questions, ...(composite ? { composite } : {}) }, args);
+  return withRisk({ state: args.state, questions, ...(composite ? { composite } : {}) }, args);
 }
 
-// Perguntas em inglês (idioma em que o jev-1.13 é mais preciso), citando campos do state pelo nome.
-const DEFAULT_NIVEIS = ["Does not meet the criterion", "Weak fit", "Adequate fit", "Good fit", "Excellent fit"];
-function buildRanquear(args) {
-  if (!onlyKeys(args, ["criterio", "candidatos", "niveis", "risco"])) invalid("Invalid arguments for jev_ranquear");
-  if (!isText(args.criterio)) invalid("Invalid criterio");
-  const candidatos = parseItems(args.candidatos, 2, 32);
-  let niveis = DEFAULT_NIVEIS;
-  if (args.niveis !== undefined) {
-    if (!Array.isArray(args.niveis) || args.niveis.length < 2 || args.niveis.length > 10 || !args.niveis.every((n) => isText(n))) invalid("Invalid niveis");
-    niveis = args.niveis;
+// Questions in English (the language jev-1.13 is most precise in), referencing state fields by name.
+const DEFAULT_LEVELS = ["Does not meet the criterion", "Weak fit", "Adequate fit", "Good fit", "Excellent fit"];
+function buildRank(args) {
+  if (!onlyKeys(args, ["criterion", "candidates", "levels", "risk"])) invalid("Invalid arguments for jev_rank");
+  if (!isText(args.criterion)) invalid("Invalid criterion");
+  const candidates = parseItems(args.candidates, 2, 32);
+  let levels = DEFAULT_LEVELS;
+  if (args.levels !== undefined) {
+    if (!Array.isArray(args.levels) || args.levels.length < 2 || args.levels.length > 10 || !args.levels.every((n) => isText(n))) invalid("Invalid levels");
+    levels = args.levels;
   }
-  const state = { criterio: args.criterio, candidatos: Object.fromEntries(candidatos.map((c) => [c.id, c.text])) };
-  const questions = Object.fromEntries(candidatos.map((c) => [c.id, {
+  const state = { criterion: args.criterion, candidates: Object.fromEntries(candidates.map((c) => [c.id, c.text])) };
+  const questions = Object.fromEntries(candidates.map((c) => [c.id, {
     type: "score",
-    instructions: `How well does the candidate in \`candidatos.${c.id}\` meet the criterion in \`criterio\`?`,
-    criteria: niveis,
+    instructions: `How well does the candidate in \`candidates.${c.id}\` meet the criterion in \`criterion\`?`,
+    criteria: levels,
   }]));
   return withRisk({ state, questions }, args);
 }
 function rankResult(result, args) {
   if (!isPlainObject(result)) return result;
-  const order = args.candidatos.map((c) => c.id);
+  const order = args.candidates.map((c) => c.id);
   const answers = isPlainObject(result.answers) ? result.answers : {};
   const ranking = order
     .filter((id) => answers[id]?.status === "ok" && typeof answers[id].score === "number")
@@ -116,8 +115,8 @@ function rankResult(result, args) {
 
 const tools = [
   {
-    name: "solicitar_decisao",
-    description: "Pede ao gateway Master-JEV Hook uma escolha entre alternativas reais, avaliação lógica ou apoio em evidências. Envie objetivo, critério e dados; o gateway monta a consulta. Resultado não concede permissões nem comprova verdade factual.",
+    name: "request_decision",
+    description: "Asks the Master-JEV Hook gateway for a choice among real alternatives, a logical evaluation, or evidence-based support. Send objective, criterion and data; the gateway builds the query. The result does not grant permissions nor prove factual truth.",
     inputSchema: { type: "object", additionalProperties: false, required: ["objective", "context"], properties: {
       objective: text8000,
       context: { type: "object", additionalProperties: false, required: ["kind"], properties: {
@@ -125,68 +124,68 @@ const tools = [
         criterion: text8000, claim: text8000,
         candidates: { type: "array", minItems: 2, maxItems: 32, items: item },
         evidence: { type: "array", maxItems: 32, items: item },
-        risk: { type: "string", enum: ["low", "medium", "high"], description: "Risco da ação decidida: low (0,65), medium (0,80) ou high (0,90) de confiança mínima." },
+        risk: { type: "string", enum: ["low", "medium", "high"], description: "Risk of the decided action: low (0.65), medium (0.80) or high (0.90) minimum confidence." },
       } },
     } },
     path: "/master/context",
     build: (args) => args,
   },
   {
-    name: "jev_classificar",
-    description: "Pede ao JEV para classificar cada item na categoria mais adequada, via /master/decide (limiar de confiança 0,65; abaixo disso o item fica sem categoria).",
-    inputSchema: { type: "object", additionalProperties: false, required: ["categorias", "itens"], properties: {
-      finalidade: text8000,
-      categorias: { type: "array", minItems: 2, maxItems: 64, items: item },
-      itens: { type: "array", minItems: 1, maxItems: 32, items: item },
-      risco,
+    name: "jev_classify",
+    description: "Asks the JEV to classify each item into the best-fitting category, via /master/decide (confidence threshold 0.65; below that the item is left uncategorized).",
+    inputSchema: { type: "object", additionalProperties: false, required: ["categories", "items"], properties: {
+      purpose: text8000,
+      categories: { type: "array", minItems: 2, maxItems: 64, items: item },
+      items: { type: "array", minItems: 1, maxItems: 32, items: item },
+      risk,
     } },
     path: "/master/decide",
-    build: buildClassificar,
+    build: buildClassify,
   },
   {
-    name: "jev_verificar",
-    description: "Pede ao JEV uma verificação booleana sobre o estado informado, via /master/decide. O Noul devolvido é a probabilidade estimada de \"sim\", não uma confiança.",
-    inputSchema: { type: "object", additionalProperties: false, required: ["pergunta", "estado"], properties: {
-      pergunta: text8000,
-      estado: text8000,
-      criterios: { type: "object", additionalProperties: false, required: ["true", "false"], properties: { true: text8000, false: text8000 } },
-      risco,
+    name: "jev_verify",
+    description: "Asks the JEV for a boolean check on the given state, via /master/decide. The returned Noul is the estimated probability of \"yes\", not a confidence.",
+    inputSchema: { type: "object", additionalProperties: false, required: ["question", "state"], properties: {
+      question: text8000,
+      state: text8000,
+      criteria: { type: "object", additionalProperties: false, required: ["true", "false"], properties: { true: text8000, false: text8000 } },
+      risk,
     } },
     path: "/master/decide",
-    build: buildVerificar,
+    build: buildVerify,
   },
   {
-    name: "jev_pontuar",
-    description: "Pede ao JEV para pontuar um ou mais critérios sobre o estado informado, via /master/decide (limiar de confiança 0,65); com pesos, o gateway também calcula um valor composto.",
-    inputSchema: { type: "object", additionalProperties: false, required: ["estado", "criterios"], properties: {
-      estado: text8000,
-      criterios: { type: "array", minItems: 1, maxItems: 32, items: { type: "object", additionalProperties: false, required: ["id", "pergunta", "niveis"], properties: {
-        id: { type: "string", pattern: "^[A-Za-z0-9_-]{1,64}$" }, pergunta: text8000,
-        niveis: { type: "array", minItems: 2, maxItems: 10, items: text8000 },
+    name: "jev_score",
+    description: "Asks the JEV to score one or more criteria on the given state, via /master/decide (confidence threshold 0.65); with weights, the gateway also computes a composite value.",
+    inputSchema: { type: "object", additionalProperties: false, required: ["state", "criteria"], properties: {
+      state: text8000,
+      criteria: { type: "array", minItems: 1, maxItems: 32, items: { type: "object", additionalProperties: false, required: ["id", "question", "levels"], properties: {
+        id: { type: "string", pattern: "^[A-Za-z0-9_-]{1,64}$" }, question: text8000,
+        levels: { type: "array", minItems: 2, maxItems: 10, items: text8000 },
       } } },
-      pesos: { type: "object" },
-      risco,
+      weights: { type: "object" },
+      risk,
     } },
     path: "/master/decide",
-    build: buildPontuar,
+    build: buildScore,
   },
   {
-    name: "jev_ranquear",
-    description: "Pede ao JEV para pontuar candidatos segundo um critério, via /master/decide (limiar de confiança 0,65), e devolve também um campo ranking com os candidatos aceitos ordenados por score.",
-    inputSchema: { type: "object", additionalProperties: false, required: ["criterio", "candidatos"], properties: {
-      criterio: text8000,
-      candidatos: { type: "array", minItems: 2, maxItems: 32, items: item },
-      niveis: { type: "array", minItems: 2, maxItems: 10, items: text8000 },
-      risco,
+    name: "jev_rank",
+    description: "Asks the JEV to score candidates against a criterion, via /master/decide (confidence threshold 0.65), and also returns a ranking field with the accepted candidates ordered by score.",
+    inputSchema: { type: "object", additionalProperties: false, required: ["criterion", "candidates"], properties: {
+      criterion: text8000,
+      candidates: { type: "array", minItems: 2, maxItems: 32, items: item },
+      levels: { type: "array", minItems: 2, maxItems: 10, items: text8000 },
+      risk,
     } },
     path: "/master/decide",
-    build: buildRanquear,
+    build: buildRank,
     postprocess: rankResult,
   },
 ];
 
 // Standard MCP guidance, including for clients without CLAUDE.md/SessionStart hooks.
-const instructions = "Havendo alternativas explícitas elegíveis, consulte o JEV antes de decidir: solicitar_decisao (objective + context com candidates, criterion, evidence) ou, para lotes, jev_classificar, jev_verificar, jev_pontuar e jev_ranquear. State enxuto, sem segredos; perguntas independentes numa só chamada. Informe o risco da ação (risco/risk): o gateway exige confiança 0,65 (baixo), 0,80 (médio) ou 0,90 (alto) em Choice/Score; Noul é probabilidade de sim, não confiança. Abstenção ou erro: alternativa local sem retry. Avise com uma linha 🔷 antes e depois de cada consulta. O resultado não executa ações nem concede permissões.";
+const instructions = "When explicit eligible alternatives exist, consult the JEV before deciding: request_decision (objective + context with candidates, criterion, evidence) or, for batches, jev_classify, jev_verify, jev_score and jev_rank. Keep state lean, no secrets; independent questions in a single call. State the risk of the action (risk): the gateway requires minimum confidence 0.65 (low), 0.80 (medium) or 0.90 (high) on Choice/Score; Noul is the probability of yes, not a confidence. Abstention or error: local alternative, no retry. Announce with one line before and after each call. The result does not execute actions nor grant permissions.";
 const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
 const error = (id, code, message) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }) + "\n");
 for await (const line of createInterface({ input: process.stdin, crlfDelay: Infinity })) {
@@ -214,6 +213,6 @@ for await (const line of createInterface({ input: process.stdin, crlfDelay: Infi
       let result = await res.json();
       if (toolDef.postprocess) result = toolDef.postprocess(result, message.params.arguments);
       reply(message.id, { content: [{ type: "text", text: JSON.stringify(result) }], isError: !res.ok || result.status === "fallback" });
-    } catch { reply(message.id, { content: [{ type: "text", text: "Gateway indisponível. Nenhuma decisão foi aplicada." }], isError: true }); }
+    } catch { reply(message.id, { content: [{ type: "text", text: "Gateway unavailable. No decision was applied." }], isError: true }); }
   } else error(message.id, -32601, "Method not found");
 }

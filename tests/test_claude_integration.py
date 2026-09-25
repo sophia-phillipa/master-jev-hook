@@ -15,9 +15,9 @@ from install import validate_gateway_url, validate_node
 
 
 def install(home, prefix, target, code, desktop, **kw):
-    """install.install com o Codex sempre num diretório temporário (nunca o ~/.codex real)."""
+    """install.install with Codex always in a temporary directory (never the real ~/.codex)."""
     kw.setdefault("codex_home", home.parent / "Codex Home")
-    with contextlib.redirect_stderr(io.StringIO()):  # Avisos de cliente ausente no --target all.
+    with contextlib.redirect_stderr(io.StringIO()):  # Missing-client warnings on --target all.
         return installer.install(home, prefix, target, code, desktop, **kw)
 
 
@@ -27,7 +27,7 @@ class ClaudeIntegrationTests(unittest.TestCase):
                 root / "Code Config/.claude.json", root / "Desktop Config/claude_desktop_config.json")
 
     def clients(self, *folders):
-        """Simula clientes instalados para que --target all os encontre."""
+        """Simulates installed clients so that --target all finds them."""
         for folder in folders:
             folder.mkdir(parents=True, exist_ok=True)
 
@@ -47,14 +47,14 @@ class ClaudeIntegrationTests(unittest.TestCase):
             install(home, prefix, "all", code, desktop, node=shutil.which("node"))
             before = {p: p.read_bytes() for p in (home / "settings.json", home / "CLAUDE.md", code, desktop)}
             install(home, prefix, "all", code, desktop, node=shutil.which("node"))
-            self.assertFalse((Path(directory) / "Codex Home").exists())  # Cliente ausente: pulado.
+            self.assertFalse((Path(directory) / "Codex Home").exists())  # Missing client: skipped.
             self.assertEqual(before, {p: p.read_bytes() for p in before})
             self.assertEqual(len(list((prefix / "backups").iterdir())), 1)
             self.assertEqual(json.loads(before[home / "settings.json"])["permissions"], settings["permissions"])
             self.assertEqual(json.loads(before[home / "settings.json"])["hooks"]["SessionStart"][0], settings["hooks"]["SessionStart"][0])
             self.assertTrue(before[home / "CLAUDE.md"].decode().startswith("Existing instructions\n"))
             chat_guide = (prefix / "master-jev-hook-claude-chat.md").read_text()
-            self.assertIn("solicitar_decisao", chat_guide)
+            self.assertIn("request_decision", chat_guide)
             self.assertNotIn("master-jev-hook-claude-chat", before[home / "CLAUDE.md"].decode())
             for path in (code, desktop):
                 data = json.loads(before[path])
@@ -65,10 +65,10 @@ class ClaudeIntegrationTests(unittest.TestCase):
                 self.assertEqual(mcp["args"], [str(prefix / "master-jev-mcp.mjs")])
                 self.assertEqual(mcp["env"]["MASTER_JEV_GATEWAY_KEY"], "private")
                 self.assertEqual(mcp["env"]["EXTRA"], "kept")
-            self.assertIn("solicitar_decisao", before[home / "CLAUDE.md"].decode())
+            self.assertIn("request_decision", before[home / "CLAUDE.md"].decode())
             self.assertNotIn("Qwen", before[home / "CLAUDE.md"].decode())
             for source in ("startup", "resume", "clear", "compact", "fork"):
-                # Guia já no CLAUDE.md: o SessionStart não o repete (economia de tokens).
+                # Guide already in CLAUDE.md: SessionStart does not repeat it (token savings).
                 result = subprocess.run([sys.executable, str(prefix / "claude_jev.py"), "hook"],
                     input=json.dumps({"hook_event_name": "SessionStart", "source": source}),
                     text=True, capture_output=True, check=True, timeout=3)
@@ -79,7 +79,7 @@ class ClaudeIntegrationTests(unittest.TestCase):
                 ours = [h for g in hooks[event] for h in g["hooks"] if str(prefix / "claude_jev.py") in h["command"]]
                 self.assertEqual(len(ours), count, event)
                 self.assertTrue(all(h["timeout"] <= 12 for h in ours), event)
-            tool = "mcp__master-jev-hook__solicitar_decisao"
+            tool = "mcp__master-jev-hook__request_decision"
             self.assertEqual([g["matcher"] for g in hooks["PreToolUse"]],
                              ["mcp__master-jev-hook__.*", "Bash"])
             self.assertEqual(json.loads((prefix / "claude_jev.json").read_text()),
@@ -90,37 +90,37 @@ class ClaudeIntegrationTests(unittest.TestCase):
                     input=json.dumps(event), text=True, capture_output=True, check=True, timeout=3)
                 return json.loads(result.stdout) if result.stdout.strip() else None
 
-            prompt = run("prompt", {"hook_event_name": "UserPromptSubmit", "prompt": "oi"})
-            self.assertIn("Regra obrigatória", prompt["hookSpecificOutput"]["additionalContext"])
+            prompt = run("prompt", {"hook_event_name": "UserPromptSubmit", "prompt": "hi"})
+            self.assertIn("Mandatory", prompt["hookSpecificOutput"]["additionalContext"])
             pre = run("pre", {"hook_event_name": "PreToolUse", "tool_name": tool,
-                              "tool_input": {"objective": "Escolher a fonte", "context": {"kind": "comparison"}}})
-            self.assertEqual(pre["systemMessage"], "🔷 Consultando JEV agora para: Escolher a fonte")
-            pre = run("pre", {"hook_event_name": "PreToolUse", "tool_name": "mcp__master-jev-hook__jev_ranquear",
-                              "tool_input": {"criterio": "Melhor fonte", "candidatos": []}})
-            self.assertEqual(pre["systemMessage"], "🔷 Consultando JEV agora para: Melhor fonte")
+                              "tool_input": {"objective": "Choose the source", "context": {"kind": "comparison"}}})
+            self.assertEqual(pre["systemMessage"], "🔷 Consulting JEV now for: Choose the source")
+            pre = run("pre", {"hook_event_name": "PreToolUse", "tool_name": "mcp__master-jev-hook__jev_rank",
+                              "tool_input": {"criterion": "Best source", "candidates": []}})
+            self.assertEqual(pre["systemMessage"], "🔷 Consulting JEV now for: Best source")
             typed = {"status": "partial", "answers": {
                 "a": {"type": "choice", "status": "ok", "choice": "x", "confidence": 0.8},
                 "b": {"type": "score", "status": "ok", "score": 0.75, "confidence": 0.9},
                 "c": {"type": "noul", "status": "ok", "noul": 0.2},
                 "d": {"type": "choice", "status": "abstain"}}}
-            post = run("post", {"hook_event_name": "PostToolUse", "tool_name": "mcp__master-jev-hook__jev_pontuar",
+            post = run("post", {"hook_event_name": "PostToolUse", "tool_name": "mcp__master-jev-hook__jev_score",
                                 "tool_response": [{"type": "text", "text": json.dumps(typed)}]})
-            self.assertEqual(post["systemMessage"], "🔷 JEV respondeu a=`x` (0,80), b=0,75, c: P(sim)=0,20.")
+            self.assertEqual(post["systemMessage"], "🔷 JEV answered a=`x` (0.80), b=0.75, c: P(yes)=0.20.")
             answer = {"status": "accepted", "assessments": {"selection": {"status": "accepted",
                       "choice": "sqlite_local", "confidence": 0.98}}}
             for response in (answer, [{"type": "text", "text": json.dumps(answer)}], json.dumps(answer)):
                 post = run("post", {"hook_event_name": "PostToolUse", "tool_name": tool, "tool_response": response})
-                self.assertEqual(post["systemMessage"], "🔷 JEV escolheu `sqlite_local` (confiança 0,98).")
+                self.assertEqual(post["systemMessage"], "🔷 JEV chose `sqlite_local` (confidence 0.98).")
             post = run("post", {"hook_event_name": "PostToolUse", "tool_name": tool,
                                 "tool_response": {"status": "abstain", "reason": "low_confidence"}})
-            self.assertIn("JEV sem decisão (low_confidence)", post["systemMessage"])
+            self.assertIn("JEV no decision (low_confidence)", post["systemMessage"])
             self.assertIsNone(run("pre", {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {}}))
 
     def test_all_skips_missing_clients_and_fails_without_any(self):
         with tempfile.TemporaryDirectory() as directory:
             home, prefix, code, desktop = self.paths(Path(directory))
             codex = Path(directory) / "Codex Home"
-            with self.assertRaisesRegex(ValueError, "Nenhum cliente"):
+            with self.assertRaisesRegex(ValueError, "No client"):
                 install(home, prefix, "all", code, desktop, node=shutil.which("node"))
             self.assertFalse(prefix.exists())
             self.clients(desktop.parent)
@@ -128,8 +128,8 @@ class ClaudeIntegrationTests(unittest.TestCase):
             with contextlib.redirect_stderr(err):
                 paths, _ = installer.install(home, prefix, "all", code, desktop,
                                              node=shutil.which("node"), codex_home=codex)
-            self.assertIn("claude-code não encontrado", err.getvalue())
-            self.assertIn("codex não encontrado", err.getvalue())
+            self.assertIn("claude-code not found", err.getvalue())
+            self.assertIn("codex not found", err.getvalue())
             self.assertIn(desktop, paths)
             self.assertFalse(home.exists())
             self.assertFalse(code.exists())
@@ -139,7 +139,7 @@ class ClaudeIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             home, prefix, code, desktop = self.paths(Path(directory))
             (home / "agents").mkdir(parents=True)
-            agent = "---\nname: my-agent\n---\nInstruções do meu agente.\n"
+            agent = "---\nname: my-agent\n---\nMy agent's instructions.\n"
             (home / "agents/my-agent.md").write_text(agent)
             old = Path(directory) / "old prefix/claude_jev.py"
             command = lambda mode: f"{sys.executable} '{old}' {mode}"
@@ -151,13 +151,13 @@ class ClaudeIntegrationTests(unittest.TestCase):
             install(home, prefix, "claude-code", code, desktop, node=shutil.which("node"))
             hooks = json.loads((home / "settings.json").read_text())["hooks"]
             commands = [h["command"] for groups in hooks.values() for g in groups for h in g["hooks"]]
-            self.assertFalse([c for c in commands if str(old) in c])  # Hooks nossos de outro prefixo saem.
-            self.assertIn("mine", commands)  # Hook alheio fica.
+            self.assertFalse([c for c in commands if str(old) in c])  # Our hooks from another prefix leave.
+            self.assertIn("mine", commands)  # A third-party hook stays.
             self.assertEqual(len([c for c in commands if str(prefix / "claude_jev.py") in c]), len(installer.HOOKS))
             self.assertEqual((home / "agents/my-agent.md").read_text(), agent)
-            result = subprocess.run([sys.executable, str(prefix / "claude_jev.py"), "modo-desconhecido"], input="{}",
+            result = subprocess.run([sys.executable, str(prefix / "claude_jev.py"), "unknown-mode"], input="{}",
                                     text=True, capture_output=True, timeout=3)
-            self.assertEqual(result.returncode, 0)  # Fail-open: modo desconhecido nunca bloqueia o PreToolUse.
+            self.assertEqual(result.returncode, 0)  # Fail-open: an unknown mode never blocks PreToolUse.
             self.assertEqual(result.stdout, "")
 
     def test_skill_is_installed_for_code_and_zipped_for_desktop(self):
@@ -206,7 +206,7 @@ class ClaudeIntegrationTests(unittest.TestCase):
             home, prefix, code, desktop = self.paths(Path(directory))
             install(home, prefix, "claude-code", code, desktop, node=shutil.which("node"))
             settings = json.loads((home / "settings.json").read_text())
-            settings["hooks"]["PreToolUse"][0]["matcher"] = "mcp__master-jev-hook__solicitar_decisao"
+            settings["hooks"]["PreToolUse"][0]["matcher"] = "mcp__master-jev-hook__request_decision"
             settings["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"] = 3
             (home / "settings.json").write_text(json.dumps(settings))
             install(home, prefix, "claude-code", code, desktop, node=shutil.which("node"))
@@ -273,7 +273,7 @@ class ClaudeIntegrationTests(unittest.TestCase):
             code.parent.mkdir()
             code.write_text(json.dumps({"mcpServers": {"master-jev-hook": {
                 "type": "http", "url": "http://example.test"}}}))
-            with self.assertRaisesRegex(ValueError, "Conflito MCP"):
+            with self.assertRaisesRegex(ValueError, "MCP conflict"):
                 install(home, prefix, "claude-code", code, desktop, node=shutil.which("node"))
             self.assertFalse(prefix.exists())
             self.assertEqual(json.loads((home / "settings.json").read_text()), settings)
@@ -298,9 +298,9 @@ class ClaudeIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             home, prefix, code, desktop = self.paths(Path(directory))
             self.clients(home, code.parent)
-            with self.assertRaisesRegex(ValueError, "Caminhos de destino coincidem"):
+            with self.assertRaisesRegex(ValueError, "Destination paths collide"):
                 install(home, prefix, "all", code, code, node=shutil.which("node"))
-            with self.assertRaisesRegex(ValueError, "Caminhos de destino coincidem"):
+            with self.assertRaisesRegex(ValueError, "Destination paths collide"):
                 install(home, prefix, "claude-code", prefix / "master-jev-mcp.mjs", desktop,
                         node=shutil.which("node"))
             self.assertFalse(prefix.exists())
@@ -393,7 +393,7 @@ class CodexTests(unittest.TestCase):
                          '[mcp_servers]\n"master-jev-hook" = { command = "mine" }\n'):
             with self.subTest(original=original):
                 self.toml.write_text(original)
-                with self.assertRaisesRegex(ValueError, "fora do bloco"):
+                with self.assertRaisesRegex(ValueError, "outside the"):
                     self.install()
                 self.assertEqual(self.toml.read_text(), original)
                 self.assertFalse(self.agents.exists())
