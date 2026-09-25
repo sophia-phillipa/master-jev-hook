@@ -1,6 +1,449 @@
 # Master-JEV Hook
 
-## O que é
+**[English](#english)** | **[Português (Brasil)](#português-brasil)**
+
+---
+
+## English
+
+<a id="english"></a>
+
+### What it is
+
+Master-JEV Hook is a local service that connects Claude Code, Claude
+Desktop and Codex to JEV, TypeSafe's decision engine, through an MCP server
+(`master-jev-hook`). Instead of the agent deciding on its own between
+explicit alternatives — which approach to follow, which source to use, which
+next action to take, how to classify or score a batch of items — it delegates
+the choice to JEV through a set of MCP tools, and the gateway logs every
+query in a local dashboard.
+
+The package has three pieces: the local HTTP gateway (`gateway/`, in
+TypeScript/Node), which talks to the TypeSafe API; the stdio MCP adapter
+(`gateway/bin/master-jev-mcp.mjs`), registered as the `master-jev-hook`
+server in supported clients; and, only for Claude Code, a set of hooks
+(`claude_jev.py`) that injects the orchestration rule into the session,
+announces when JEV is queried and performs spot checks (risky Bash command,
+completion without verification, what to preserve during a compaction),
+always without blocking the session.
+
+JEV decides between options the agent has already raised: it does not
+generate text, does not prove facts on its own, and does not grant
+permissions. Registering the MCP server also does not change the model's
+inference endpoint — it is one more tool the agent can call, and the hooks
+just reinforce when to call it.
+
+### How it works
+
+```mermaid
+flowchart LR
+    subgraph Clients
+        CC[Claude Code]
+        CD[Claude Desktop]
+        CX[Codex]
+    end
+    subgraph Local["Local machine"]
+        MCP["master-jev-mcp.mjs\n(stdio/JSON-RPC)"]
+        GW["HTTP Gateway\n127.0.0.1:8795"]
+        DASH["/dashboard"]
+    end
+    API["TypeSafe API\napi.typesafe.ai"]
+    HOOKS["claude_jev.py\n(Claude Code hooks)"]
+
+    CC --> MCP
+    CD --> MCP
+    CX --> MCP
+    MCP -->|"/master/context (request_decision)"| GW
+    MCP -->|"/master/decide (batches)"| GW
+    HOOKS -->|"/master/decide (low risk)"| GW
+    GW --> API
+    GW --> DASH
+```
+
+The client calls an MCP tool; the `master-jev-mcp.mjs` adapter translates
+the call into an HTTP request to the local gateway; the gateway builds the
+question for JEV (Choice, Score or Noul), queries the TypeSafe API and
+returns the result. The MCP adapter does not store the API key — it stays
+only in the gateway's environment.
+
+#### MCP tools
+
+| Tool | Route | Question sent to JEV | Use |
+| --- | --- | --- | --- |
+| `request_decision` | `/master/context` | Built by the gateway (goal + context with candidates, criterion, evidence, risk) | Choosing an approach, source or next action |
+| `jev_classify` | `/master/decide` | One Choice per item (up to 32; 2 to 64 categories) | Labeling items in batch |
+| `jev_verify` | `/master/decide` | Noul (probability of yes) | Checking whether a passage satisfies a condition |
+| `jev_score` | `/master/decide` | One Score per criterion, with optional weights | Scoring risk, quality or urgency |
+| `jev_rank` | `/master/decide` | One Score per candidate, with ranking | Triaging items before reading everything |
+
+#### Confidence thresholds by risk
+
+Each query reports the risk of the action (`risk`); the gateway
+requires a minimum confidence for Choice or Score responses:
+
+| Risk | Minimum confidence | When to use |
+| --- | --- | --- |
+| low (default) | 0.65 | Reading, triage, investigation order |
+| medium | 0.80 | Reversible change, choice of approach |
+| high | 0.90 | Irreversible, external, security-related action or one involving credentials |
+
+Below the threshold, or on error, the gateway abstains — the response is not
+used and the client proceeds with the local alternative, without repeating
+the decision. Noul (used by `jev_verify`) is a probability of "yes", not
+a confidence, and has its own threshold. No JEV result proves facts or
+grants permissions on its own.
+
+#### Claude Code hooks
+
+All hooks are fail-open: error, timeout, JEV abstention or confidence below
+the threshold never blocks the session.
+
+| Event | What it does |
+| --- | --- |
+| `SessionStart` | Injects the orchestration rule into the session, if not already in `CLAUDE.md`; after compaction, reinjects what JEV marked as relevant |
+| `UserPromptSubmit` | Short reminder of the rule on every message |
+| `PreToolUse` (gateway tools) | Announces before each JEV query |
+| `PostToolUse` (gateway tools) | Announces the query result |
+| `PreToolUse` (Bash) | If a local filter finds the command risky, asks JEV whether it is routine, needs confirmation, or is destructive; never decides alone between allow and deny |
+| `Stop` | If there was an edit without verification afterward, asks JEV; alerts the agent, at most three times per session |
+| `PreCompact` | Asks JEV, message by message, what is worth preserving before compacting |
+| `PostToolUse` (all tools) | Every 15 tool calls, asks JEV whether the session is still on track, stuck, or has drifted out of scope |
+
+#### Dashboard
+
+The local dashboard, at `http://127.0.0.1:8795/dashboard`, lists the calls
+to JEV: route, tokens reported, latency, decision, question and sanitized
+result. Every query made by the MCP and by the hooks appears there. Without
+the `JEV_LOG_FILE` variable, the history stays only in memory and is lost on
+every gateway restart.
+
+### Prerequisites
+
+- Linux or macOS. Native Windows needs Python 3.13+ (the installer uses
+  `os.fchmod`); the simplest alternative is running everything inside WSL2,
+  since the gateway build uses POSIX-style `rm`/`cp`.
+- Node.js 22.15 or newer, with an absolute path accessible to the client
+  that will run the MCP.
+- pnpm 10.33.3 (set in `gateway/package.json`). Without pnpm installed
+  globally, use `npm exec --yes --package=pnpm@10.33.3 -- pnpm <command>`.
+- Python 3.11 or newer, using only the standard library.
+- Your own TypeSafe API key.
+- Claude Code, Claude Desktop and/or Codex already installed on the desired
+  targets.
+
+### Installation
+
+#### 1. Clone the repository
+
+```bash
+git clone https://github.com/sophia-phillipa/master-jev-hook.git
+```
+
+#### 2. Build the gateway
+
+```bash
+cd master-jev-hook/gateway
+```
+
+```bash
+pnpm install --frozen-lockfile --ignore-scripts
+```
+
+```bash
+pnpm typecheck
+```
+
+```bash
+pnpm build
+```
+
+This generates `gateway/dist/` from the code in `gateway/src/`. None of
+these commands queries the TypeSafe API.
+
+#### 3. Create the private environment file
+
+The file with the key lives outside the repository, in mode 600:
+
+```bash
+cd ..
+```
+
+```bash
+umask 077; mkdir -p ~/.config/master-jev-hook ~/.local/state/master-jev-hook
+```
+
+```bash
+umask 077; set -C; cp deploy/gateway.env.example ~/.config/master-jev-hook/gateway.env
+```
+
+```bash
+chmod 600 ~/.config/master-jev-hook/gateway.env
+```
+
+Edit `~/.config/master-jev-hook/gateway.env` to fill in `TYPESAFE_API_KEY`
+and the absolute path of `JEV_LOG_FILE` (never paste the key into chat, the
+shell history, or a commit). The gateway reads this file with
+`node --env-file`, so do not `source` it.
+
+Main variables (see `deploy/gateway.env.example` for the full list):
+
+| Variable | Default | Function |
+| --- | --- | --- |
+| `TYPESAFE_API_KEY` | (required) | TypeSafe API key |
+| `HOST` | `127.0.0.1` | Gateway interface (loopback by default) |
+| `PORT` | `8795` | Gateway and dashboard HTTP port |
+| `JEV_MODEL` | `jev-latest` | JEV model (code default for the TypeSafe provider; `deploy/gateway.env.example` pins `jev-1.13.0`) |
+| `JEV_MIN_CONFIDENCE` | `0.65` | Minimum confidence for low risk |
+| `JEV_MIN_CONFIDENCE_MEDIUM` | `0.80` | Minimum confidence for medium risk |
+| `JEV_MIN_CONFIDENCE_HIGH` | `0.90` | Minimum confidence for high risk |
+| `JEV_DIRECT_CALLS` | `false` | Answer without calling JEV when the arguments are already certain |
+| `JEV_CONTEXT_ROUTING` | `true` | Enables the `/master/context` route |
+| `JEV_INSPECT_INPUTS` | `false` | Keeps local copies of the inputs sent to JEV (may contain private data) |
+| `JEV_LOG_FILE` | (empty) | Absolute path of the log; without it, the dashboard history does not survive a restart |
+
+#### 4. Run the gateway as a Linux user systemd service
+
+Copy the service template, replacing `@REPO@` with the absolute path of the
+checkout and `@NODE@` with the absolute path of Node
+(`readlink -f "$(command -v node)"`):
+
+```bash
+mkdir -p ~/.config/systemd/user
+```
+
+```bash
+sed -e "s|@REPO@|$(pwd)|" -e "s|@NODE@|$(readlink -f "$(command -v node)")|" deploy/master-jev-hook.service > ~/.config/systemd/user/master-jev-hook.service
+```
+
+```bash
+systemctl --user daemon-reload
+```
+
+```bash
+systemctl --user enable --now master-jev-hook.service
+```
+
+```bash
+curl -s http://127.0.0.1:8795/health
+```
+
+On macOS, use an equivalent `LaunchAgent` (not covered by this repository).
+If port `8795` is already in use, pick another free one and update it
+consistently in the service (`PORT` in `gateway.env`), the installer
+(`--gateway-url`) and any hook already configured. `scripts/verify.sh` no
+longer uses a fixed port: it reads the URL recorded by the installer in
+`PREFIX/claude_jev.json` (`gateway_url` field, `PREFIX` following the same
+`~/.local/share/master-jev-hook` pattern), unless the
+`MASTER_JEV_GATEWAY_URL` environment variable is set, which takes priority
+over the file.
+
+#### 5. Install on the clients
+
+```bash
+python3 install.py --dry-run
+```
+
+`--dry-run` shows the plan without writing anything. After checking it:
+
+```bash
+python3 install.py --target all
+```
+
+`--target` accepts `claude-code`, `claude-desktop`, `codex` or `all`
+(default). With `all`, a missing client is skipped with a warning; an
+explicit target installs anyway. Other useful options: `--node`,
+`--gateway-url`, `--claude-home`, `--code-config`, `--desktop-config`,
+`--codex-home`, `--prefix` (default `~/.local/share/master-jev-hook`). The
+whole plan is validated before any write; the installation is idempotent
+and backs up what it replaces.
+
+With the `CLAUDE_CONFIG_DIR` environment variable set, `install.py` writes
+`settings.json`, `CLAUDE.md`, `skills/` and `.claude.json` directly to
+`$CLAUDE_CONFIG_DIR` (including as the default for `--claude-home`), instead
+of `~/.claude` and `~/.claude.json`.
+
+After installing, restart the clients — sessions already open do not
+receive the new instructions. In Claude Code, `/mcp` lists the
+`master-jev-hook` server and `/hooks` shows the installed hooks.
+
+#### 6. Verify, at no cost
+
+```bash
+scripts/verify.sh
+```
+
+The script checks the gateway, the installed files and the configuration of
+each client present, without making any paid API call.
+
+#### 7. Open the dashboard
+
+```bash
+curl -s http://127.0.0.1:8795/dashboard > /dev/null && echo "dashboard at http://127.0.0.1:8795/dashboard"
+```
+
+Or open `http://127.0.0.1:8795/dashboard` directly in the browser.
+
+### Claude Desktop (Chat mode)
+
+In Chat mode, Claude Desktop sees the MCP server, but does not read
+`CLAUDE.md` nor run the Claude Code hooks. For the same level of
+instruction in this mode, the installer generates two files in the
+installation prefix:
+
+- `master-jev-hook-claude-chat.md`: instructions equivalent to Claude
+  Code's, in plain text, to paste as an app or project instruction.
+- `master-jev-hook-skill.zip`: the packaged `master-jev-hook` skill, to
+  upload under Settings → Capabilities → Skills.
+
+### Codex
+
+`install.py` writes, between managed markers, two blocks:
+
+- In `$CODEX_HOME/config.toml`, between `# master-jev-hook:begin` and
+  `# master-jev-hook:end`: the `[mcp_servers.master-jev-hook]` section, with
+  the Node command, the adapter path and `MASTER_JEV_GATEWAY_URL` in the
+  environment.
+- In `$CODEX_HOME/AGENTS.md`, between `<!-- master-jev-hook:begin -->` and
+  `<!-- master-jev-hook:end -->`: the orchestration rule for Codex.
+
+`$CODEX_HOME` follows the `CODEX_HOME` environment variable, defaulting to
+`~/.codex`.
+
+### Optional proxy mode
+
+Besides responding to MCP tools and hooks, the same gateway can act as a
+proxy for the LLM traffic of the `gateway/bin` launchers
+(`master-jev-codex`, `master-jev-claude`, `master-jev-gemini`,
+`master-jev-opencode`): each one brings up a local gateway and points the
+client at it, which routes tool choice through JEV and forwards the rest of
+the request to the real provider. It is in this mode that the
+`UPSTREAM_BASE_URL`/`UPSTREAM_API_KEY` variables come in (and the
+launcher-specific ones, like `JEV_CODEX_UPSTREAM_BASE_URL`), along with the
+`upstream` field returned by `GET /health`. Normal use through MCP and hooks
+(Claude Code, Claude Desktop, Codex configured by `install.py`) does not
+depend on this mode.
+
+### Privacy and costs
+
+Each query to JEV — via the MCP tools or via the hooks — is a paid call to
+the TypeSafe API. Installation itself (cloning, building, running
+`install.py --dry-run` or `scripts/verify.sh`) makes no paid query; the
+cost starts when a client actually calls an MCP tool or a decision hook
+fires.
+
+The payload sent to JEV contains the decision's goal, the candidates, the
+criterion, textual evidence and the reported risk level — never the API
+key, which stays only in the gateway process. `JEV_INSPECT_INPUTS` and
+`JEV_DEBUG_DUMP_DIR`, both off by default, keep local copies of the inputs
+sent for debugging; since they may contain free text with private data,
+keep them off outside of a specific investigation. Never paste secrets
+(keys, passwords, tokens) into a question or context sent to JEV.
+
+### Uninstall / restore backup
+
+Every installation that changes something writes a backup to
+`PREFIX/backups/<timestamp>/`, with the previous content of each touched
+file and a `restore.json` (`backup: null` indicates a file created by that
+installation, not a replaced file). To restore, close the clients and copy
+back only the desired destinations from that backup, deleting the ones that
+had `backup: null`.
+
+To uninstall manually (if the installation used `CLAUDE_CONFIG_DIR`,
+replace `~/.claude` and `~/.claude.json` below with `$CLAUDE_CONFIG_DIR` and
+`$CLAUDE_CONFIG_DIR/.claude.json`, respectively):
+
+- Remove the `mcpServers.master-jev-hook` entry from `~/.claude.json` and
+  from `claude_desktop_config.json`.
+- Remove the hooks whose command contains `PREFIX/claude_jev.py` in
+  `~/.claude/settings.json`.
+- Remove the `master-jev-hook-claude` block from `~/.claude/CLAUDE.md` and
+  the `~/.claude/skills/master-jev-hook/` folder.
+- Remove the `# master-jev-hook:begin`/`# master-jev-hook:end` block from
+  `$CODEX_HOME/config.toml` and the `<!-- master-jev-hook:begin -->`/
+  `<!-- master-jev-hook:end -->` block from `$CODEX_HOME/AGENTS.md`.
+- Delete `PREFIX` (default `~/.local/share/master-jev-hook`).
+
+For the gateway:
+
+```bash
+systemctl --user disable --now master-jev-hook.service
+```
+
+Afterward, if you want, remove the unit and the
+`~/.config/master-jev-hook/` and `~/.local/state/master-jev-hook/` folders.
+
+### Development
+
+Installer and hook tests (Python):
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+Gateway tests and type checking (inside `gateway/`):
+
+```bash
+pnpm typecheck
+```
+
+```bash
+pnpm test
+```
+
+#### Testing without a key (simulated JEV)
+
+`gateway/scripts/mock-jev.mjs` is a local substitute for
+`POST /v1/systemone`, to exercise the gateway end to end without a TypeSafe
+key. Start it (default port 8799, adjustable with `MOCK_JEV_PORT`):
+
+```bash
+node gateway/scripts/mock-jev.mjs
+```
+
+Then, inside `gateway/`, point a test gateway at it with
+`TYPESAFE_BASE_URL` (keeping `TYPESAFE_API_KEY` as any non-empty value, just
+to pass validation). Use a different `PORT`, since the installed service
+already occupies 8795:
+
+```bash
+TYPESAFE_API_KEY=mock TYPESAFE_BASE_URL=http://127.0.0.1:8799 PORT=8899 pnpm dev
+```
+
+For the MCP and the hooks to use this test gateway, install pointing at the
+same port (preferably with a temporary `HOME`, so as not to change your
+real installation):
+
+```bash
+python3 install.py --gateway-url http://127.0.0.1:8899
+```
+
+By default, the mock answers `request_decision` questions with confidence
+`0.5` (`MOCK_JEV_ARG_CERTAINTY` variable, default `0.5`) — below the minimum
+threshold (`0.65`), so JEV abstains and the decision is left to the local
+alternative, as in production. To force a choice, start the mock with a
+certainty above the threshold, for example:
+
+```bash
+MOCK_JEV_ARG_CERTAINTY=0.9 node gateway/scripts/mock-jev.mjs
+```
+
+Other mock variables: `MOCK_JEV_SCRIPT` (tool names to return in sequence,
+for LLM client tool routing), `MOCK_JEV_CONFIDENCE` (confidence of the tool
+choice, default `0.95`) and `MOCK_JEV_DUMP_DIR` (writes each question and
+answer to disk, for debugging).
+
+### License
+
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Third-party credits in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+---
+
+## Português (Brasil)
+
+<a id="português-brasil"></a>
+
+### O que é
 
 O Master-JEV Hook é um serviço local que conecta o Claude Code, o Claude
 Desktop e o Codex ao JEV, o motor de decisão da TypeSafe, por um servidor MCP
@@ -24,7 +467,7 @@ prova fatos por conta própria e não concede permissões. Registrar o servidor
 MCP também não muda o endpoint de inferência do modelo — é uma ferramenta a
 mais que o agente pode chamar, e os hooks apenas reforçam quando chamá-la.
 
-## Como funciona
+### Como funciona
 
 ```mermaid
 flowchart LR
@@ -44,7 +487,7 @@ flowchart LR
     CC --> MCP
     CD --> MCP
     CX --> MCP
-    MCP -->|"/master/context (solicitar_decisao)"| GW
+    MCP -->|"/master/context (request_decision)"| GW
     MCP -->|"/master/decide (lotes)"| GW
     HOOKS -->|"/master/decide (risco baixo)"| GW
     GW --> API
@@ -57,34 +500,34 @@ para o JEV (Choice, Score ou Noul), consulta a API da TypeSafe e devolve o
 resultado. O adaptador MCP não guarda a chave da API — ela fica só no ambiente
 do gateway.
 
-### Ferramentas MCP
+#### Ferramentas MCP
 
 | Ferramenta | Rota | Pergunta ao JEV | Uso |
 | --- | --- | --- | --- |
-| `solicitar_decisao` | `/master/context` | Montada pelo gateway (objetivo + contexto com candidatos, critério, evidência, risco) | Escolha de abordagem, fonte ou próxima ação |
-| `jev_classificar` | `/master/decide` | Uma Choice por item (até 32; 2 a 64 categorias) | Rotular itens em lote |
-| `jev_verificar` | `/master/decide` | Noul (probabilidade de sim) | Checar se um trecho satisfaz uma condição |
-| `jev_pontuar` | `/master/decide` | Uma Score por critério, com pesos opcionais | Pontuar risco, qualidade ou urgência |
-| `jev_ranquear` | `/master/decide` | Uma Score por candidato, com ranking | Triar itens antes de ler tudo |
+| `request_decision` | `/master/context` | Montada pelo gateway (objetivo + contexto com candidatos, critério, evidência, risco) | Escolha de abordagem, fonte ou próxima ação |
+| `jev_classify` | `/master/decide` | Uma Choice por item (até 32; 2 a 64 categorias) | Rotular itens em lote |
+| `jev_verify` | `/master/decide` | Noul (probabilidade de sim) | Checar se um trecho satisfaz uma condição |
+| `jev_score` | `/master/decide` | Uma Score por critério, com pesos opcionais | Pontuar risco, qualidade ou urgência |
+| `jev_rank` | `/master/decide` | Uma Score por candidato, com ranking | Triar itens antes de ler tudo |
 
-### Limiares de confiança por risco
+#### Limiares de confiança por risco
 
-Cada consulta informa o risco da ação (`risco`/`risk`); o gateway exige uma
+Cada consulta informa o risco da ação (`risk`); o gateway exige uma
 confiança mínima em respostas do tipo Choice ou Score:
 
-| Risco | Confiança mínima | Quando usar |
+| Risco (`risk`) | Confiança mínima | Quando usar |
 | --- | --- | --- |
-| baixo (padrão) | 0.65 | Leitura, triagem, ordem de investigação |
-| médio | 0.80 | Mudança reversível, escolha de abordagem |
-| alto | 0.90 | Ação irreversível, externa, de segurança ou com credenciais |
+| `low` (padrão) | 0.65 | Leitura, triagem, ordem de investigação |
+| `medium` | 0.80 | Mudança reversível, escolha de abordagem |
+| `high` | 0.90 | Ação irreversível, externa, de segurança ou com credenciais |
 
 Abaixo do limiar, ou em caso de erro, o gateway abstém — a resposta não é
 usada e o cliente segue com a alternativa local, sem repetir a decisão. Noul
-(usado por `jev_verificar`) é uma probabilidade de "sim", não uma confiança, e
+(usado por `jev_verify`) é uma probabilidade de "sim", não uma confiança, e
 tem limiar próprio. Nenhum resultado do JEV prova fatos nem concede permissões
 por si só.
 
-### Hooks do Claude Code
+#### Hooks do Claude Code
 
 Todos os hooks são fail-open: erro, timeout, abstenção do JEV ou confiança
 abaixo do limiar nunca bloqueiam a sessão.
@@ -100,7 +543,7 @@ abaixo do limiar nunca bloqueiam a sessão.
 | `PreCompact` | Pergunta ao JEV, mensagem a mensagem, o que vale a pena preservar antes de compactar |
 | `PostToolUse` (todas as ferramentas) | A cada 15 ferramentas, pergunta ao JEV se a sessão segue no rumo, travou ou saiu do escopo |
 
-### Painel
+#### Painel
 
 O painel local, em `http://127.0.0.1:8795/dashboard`, lista as chamadas ao
 JEV: rota, tokens informados, latência, decisão, pergunta e resultado
@@ -108,7 +551,7 @@ sanitizado. Toda consulta feita pelo MCP e pelos hooks aparece ali. Sem a
 variável `JEV_LOG_FILE`, o histórico fica só em memória e se perde a cada
 reinício do gateway.
 
-## Pré-requisitos
+### Pré-requisitos
 
 - Linux ou macOS. Windows nativo precisa de Python 3.13+ (o instalador usa
   `os.fchmod`); a alternativa mais simples é rodar tudo dentro do WSL2, já que
@@ -121,15 +564,15 @@ reinício do gateway.
 - Uma chave própria da API da TypeSafe.
 - Claude Code, Claude Desktop e/ou Codex já instalados nos alvos desejados.
 
-## Instalação
+### Instalação
 
-### 1. Clonar o repositório
+#### 1. Clonar o repositório
 
 ```bash
 git clone https://github.com/sophia-phillipa/master-jev-hook.git
 ```
 
-### 2. Construir o gateway
+#### 2. Construir o gateway
 
 ```bash
 cd master-jev-hook/gateway
@@ -150,7 +593,7 @@ pnpm build
 Isso gera `gateway/dist/` a partir do código em `gateway/src/`. Nenhum desses
 comandos consulta a API da TypeSafe.
 
-### 3. Criar o arquivo de ambiente privado
+#### 3. Criar o arquivo de ambiente privado
 
 O arquivo com a chave fica fora do repositório, em modo 600:
 
@@ -192,7 +635,7 @@ completa):
 | `JEV_INSPECT_INPUTS` | `false` | Guarda cópias locais das entradas enviadas ao JEV (pode conter dados privados) |
 | `JEV_LOG_FILE` | (vazio) | Caminho absoluto do log; sem ele, o histórico do painel não sobrevive a um reinício |
 
-### 4. Subir o gateway como serviço systemd de usuário (Linux)
+#### 4. Subir o gateway como serviço systemd de usuário (Linux)
 
 Copie o modelo de serviço, substituindo `@REPO@` pelo caminho absoluto do
 checkout e `@NODE@` pelo caminho absoluto do Node (`readlink -f "$(command -v node)"`):
@@ -220,13 +663,13 @@ curl -s http://127.0.0.1:8795/health
 Em macOS, use um `LaunchAgent` equivalente (não coberto por este repositório).
 Se a porta `8795` já estiver em uso, escolha outra livre e atualize junto o
 serviço (`PORT` no `gateway.env`), o instalador (`--gateway-url`) e qualquer
-hook já configurado. `scripts/verificar.sh` não usa mais uma porta fixa: ele lê
+hook já configurado. `scripts/verify.sh` não usa mais uma porta fixa: ele lê
 a URL gravada pelo instalador em `PREFIX/claude_jev.json` (campo `gateway_url`,
 `PREFIX` com o mesmo padrão `~/.local/share/master-jev-hook`), a menos que a
 variável de ambiente `MASTER_JEV_GATEWAY_URL` esteja definida, que tem
 prioridade sobre o arquivo.
 
-### 5. Instalar nos clientes
+#### 5. Instalar nos clientes
 
 ```bash
 python3 install.py --dry-run
@@ -254,16 +697,16 @@ Depois de instalar, reinicie os clientes — sessões já abertas não recebem a
 instruções novas. No Claude Code, `/mcp` lista o servidor `master-jev-hook`
 e `/hooks` mostra os hooks instalados.
 
-### 6. Verificar, sem custo
+#### 6. Verificar, sem custo
 
 ```bash
-scripts/verificar.sh
+scripts/verify.sh
 ```
 
 O script confere o gateway, os arquivos instalados e a configuração de cada
 cliente presente, sem fazer nenhuma consulta paga à API.
 
-### 7. Abrir o painel
+#### 7. Abrir o painel
 
 ```bash
 curl -s http://127.0.0.1:8795/dashboard > /dev/null && echo "painel em http://127.0.0.1:8795/dashboard"
@@ -271,7 +714,7 @@ curl -s http://127.0.0.1:8795/dashboard > /dev/null && echo "painel em http://12
 
 Ou abra `http://127.0.0.1:8795/dashboard` diretamente no navegador.
 
-## Claude Desktop (modo Chat)
+### Claude Desktop (modo Chat)
 
 No modo Chat, o Claude Desktop enxerga o servidor MCP, mas não lê o
 `CLAUDE.md` nem roda os hooks do Claude Code. Para o mesmo nível de instrução
@@ -282,7 +725,7 @@ nesse modo, o instalador gera dois arquivos no prefixo de instalação:
 - `master-jev-hook-skill.zip`: a skill `master-jev-hook` empacotada, para subir em
   Configurações → Capabilities → Skills.
 
-## Codex
+### Codex
 
 O `install.py` escreve, entre marcadores gerenciados, dois blocos:
 
@@ -296,7 +739,7 @@ O `install.py` escreve, entre marcadores gerenciados, dois blocos:
 `$CODEX_HOME` segue a variável de ambiente `CODEX_HOME`, com `~/.codex` como
 padrão.
 
-## Modo proxy opcional
+### Modo proxy opcional
 
 Além de responder às ferramentas MCP e aos hooks, o mesmo gateway pode atuar
 como proxy do tráfego de LLM dos lançadores `gateway/bin` (`master-jev-codex`,
@@ -309,11 +752,11 @@ específicas de cada lançador, como `JEV_CODEX_UPSTREAM_BASE_URL`) e o campo
 Code, Claude Desktop, Codex configurados por `install.py`) não depende desse
 modo.
 
-## Privacidade e custos
+### Privacidade e custos
 
 Cada consulta ao JEV — pelas ferramentas MCP ou pelos hooks — é uma chamada
 paga à API da TypeSafe. A instalação em si (clonar, construir, rodar
-`install.py --dry-run` ou `scripts/verificar.sh`) não faz nenhuma consulta
+`install.py --dry-run` ou `scripts/verify.sh`) não faz nenhuma consulta
 paga; o custo começa quando um cliente chama de fato uma ferramenta MCP ou um
 hook de decisão dispara.
 
@@ -325,7 +768,7 @@ entradas enviadas para depuração; como podem conter texto livre com dados
 privados, mantenha-os desligados fora de investigação pontual. Nunca cole
 segredos (chaves, senhas, tokens) em uma pergunta ou contexto enviado ao JEV.
 
-## Desinstalar / restaurar backup
+### Desinstalar / restaurar backup
 
 Cada instalação que altera algo grava um backup em
 `PREFIX/backups/<timestamp>/`, com o conteúdo anterior de cada arquivo tocado
@@ -358,7 +801,7 @@ systemctl --user disable --now master-jev-hook.service
 Depois, se quiser, remova a unit e as pastas
 `~/.config/master-jev-hook/` e `~/.local/state/master-jev-hook/`.
 
-## Desenvolvimento
+### Desenvolvimento
 
 Testes do instalador e dos hooks (Python):
 
@@ -376,7 +819,7 @@ pnpm typecheck
 pnpm test
 ```
 
-### Testar sem chave (JEV simulado)
+#### Testar sem chave (JEV simulado)
 
 `gateway/scripts/mock-jev.mjs` é um substituto local de `POST /v1/systemone`,
 para exercitar o gateway de ponta a ponta sem uma chave da TypeSafe. Suba-o
@@ -403,7 +846,7 @@ instalação real):
 python3 install.py --gateway-url http://127.0.0.1:8899
 ```
 
-No padrão, o mock responde às perguntas de `solicitar_decisao` com confiança
+No padrão, o mock responde às perguntas de `request_decision` com confiança
 `0.5` (variável `MOCK_JEV_ARG_CERTAINTY`, padrão `0.5`) — abaixo do limiar
 mínimo (`0.65`), então o JEV se abstém e a decisão fica por conta da
 alternativa local, como em produção. Para forçar uma escolha, suba o mock com
@@ -418,7 +861,7 @@ sequência, para roteamento de ferramentas de clientes LLM), `MOCK_JEV_CONFIDENC
 (confiança da escolha de ferramenta, padrão `0.95`) e `MOCK_JEV_DUMP_DIR`
 (grava cada pergunta e resposta em disco, para depuração).
 
-## Licença
+### Licença
 
 Apache License 2.0 — veja [LICENSE](LICENSE) e [NOTICE](NOTICE). Créditos de
 terceiros em [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

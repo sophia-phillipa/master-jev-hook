@@ -1,4 +1,45 @@
-# Gateway do Master-JEV Hook
+# Master-JEV Hook Gateway
+
+**[English](#english)** | **[Português (Brasil)](#português-brasil)**
+
+---
+
+## English
+
+<a id="english"></a>
+
+Local Node.js service that brings JEV's decisions to the agent. It exposes
+the decision MCP tools (`bin/master-jev-mcp.mjs`), serves the Master-JEV
+Hook HTTP routes, routes tool choice for LLM clients (Codex, Claude Code,
+OpenCode, Gemini) and serves a dashboard at `/dashboard`.
+
+Overview, installation and usage: [main README](../README.md).
+
+### Commands
+
+Requires Node.js 22.15 or newer and pnpm.
+
+```sh
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm typecheck      # type checking
+pnpm build          # compiles to dist/ and copies the dashboard
+pnpm test           # tests (vitest)
+pnpm start          # starts the gateway from dist/
+pnpm dev            # development mode, reloads on save
+pnpm smoke:install  # packaged installation (after build)
+```
+
+Environment variables: see [.env.example](.env.example).
+
+### License
+
+MIT. See [LICENSE](../LICENSE) and [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+
+---
+
+## Português (Brasil)
+
+<a id="português-brasil"></a>
 
 Serviço local em Node.js que leva as decisões do JEV ao agente. Ele expõe as
 ferramentas MCP de decisão (`bin/master-jev-mcp.mjs`), atende as rotas HTTP do
@@ -7,7 +48,7 @@ OpenCode, Gemini) e serve um painel em `/dashboard`.
 
 Visão geral, instalação e uso: [README principal](../README.md).
 
-## Comandos
+### Comandos
 
 Requer Node.js 22.15 ou mais recente e pnpm.
 
@@ -23,6 +64,6 @@ pnpm smoke:install  # instalação empacotada (depois do build)
 
 Variáveis de ambiente: veja [.env.example](.env.example).
 
-## Licença
+### Licença
 
 MIT. Veja [LICENSE](../LICENSE) e [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
