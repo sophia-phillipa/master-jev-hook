@@ -1,0 +1,71 @@
+{
+  "name": "master-jev-hook",
+  "version": "0.1.0",
+  "description": "Gateway do Master-JEV Hook: decisões do JEV via MCP e HTTP, roteamento de ferramentas para clientes LLM e painel local",
+  "keywords": [
+    "llm",
+    "gateway",
+    "proxy",
+    "jev",
+    "typesafe",
+    "tool-calling",
+    "codex",
+    "claude-code",
+    "opencode",
+    "gemini",
+    "openai",
+    "anthropic"
+  ],
+  "license": "Apache-2.0",
+  "author": "Sophia Phillipa",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sophia-phillipa/master-jev-hook.git"
+  },
+  "homepage": "https://github.com/sophia-phillipa/master-jev-hook#readme",
+  "bugs": {
+    "url": "https://github.com/sophia-phillipa/master-jev-hook/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.15"
+  },
+  "bin": {
+    "master-jev-codex": "bin/jev-codex.mjs",
+    "master-jev-claude": "bin/jev-claude.mjs",
+    "master-jev-opencode": "bin/jev-opencode.mjs",
+    "master-jev-gemini": "bin/jev-gemini.mjs"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "scripts/mock-jev.mjs",
+    ".env.example",
+    "scripts/smoke-install.mjs"
+  ],
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
+    "start": "node --env-file-if-exists=.env dist/index.js",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp src/dashboard.html dist/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --pool=threads",
+    "codex": "node bin/jev-codex.mjs",
+    "claude": "node bin/jev-claude.mjs",
+    "opencode": "node bin/jev-opencode.mjs",
+    "gemini": "node bin/jev-gemini.mjs",
+    "smoke:install": "node scripts/smoke-install.mjs"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "hono": "^4.13.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "@typesafe-ai/sdk": "^0.6.0",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  },
+  "packageManager": "pnpm@10.33.3",
+  "private": true
+}

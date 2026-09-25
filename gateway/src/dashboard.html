@@ -1,0 +1,891 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Master-JEV Hook</title>
+<style>
+  :root {
+    color-scheme: light;
+    --plane: #f3f5fa; --surface: #ffffff; --ink: #141c2e; --ink-2: #46526b; --muted: #5f6b84;
+    --grid: #e2e7f0; --axis: #c1c9d8; --border: #dce2ec; --wash: #edf1f8; --shadow: rgba(20, 35, 70, 0.06);
+    --accent: #2d4bc8; --on-accent: #ffffff; --brand: #0f766e;
+    --answered: #1f7a55; --partial: #5a60c4; --abstain: #a86800; --failed: #bf3350; --skipped: #9aa3b4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --plane: #0d1220; --surface: #151c2d; --ink: #e9eef8; --ink-2: #b4bed2; --muted: #8e99ae;
+      --grid: #222b3f; --axis: #394460; --border: #273149; --wash: #1d2638; --shadow: rgba(0, 0, 0, 0.35);
+      --accent: #8fa3ff; --on-accent: #0d1220; --brand: #4fd1c1;
+      --answered: #4cc38a; --partial: #9ca2f0; --abstain: #e6a93c; --failed: #f07089; --skipped: #5f6a82;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plane: #0d1220; --surface: #151c2d; --ink: #e9eef8; --ink-2: #b4bed2; --muted: #8e99ae;
+    --grid: #222b3f; --axis: #394460; --border: #273149; --wash: #1d2638; --shadow: rgba(0, 0, 0, 0.35);
+    --accent: #8fa3ff; --on-accent: #0d1220; --brand: #4fd1c1;
+    --answered: #4cc38a; --partial: #9ca2f0; --abstain: #e6a93c; --failed: #f07089; --skipped: #5f6a82;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--plane); color: var(--ink); font: 14px/1.45 "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 48px; display: grid; gap: 16px; }
+  h1, h2, .tile .value { font-family: "Avenir Next", "Segoe UI Variable Display", "Inter", system-ui, sans-serif; letter-spacing: -0.01em; }
+  h2 { font-size: 15px; margin: 0 0 4px; font-weight: 650; color: var(--ink); }
+
+  .masthead { position: relative; overflow: hidden; padding: 0; }
+  .masthead::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: linear-gradient(90deg, var(--accent), var(--brand)); }
+  .brand-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 18px 16px 12px; }
+  .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .brand svg { flex: none; width: 36px; height: 36px; }
+  h1 { font-size: 21px; line-height: 1.15; margin: 0; font-weight: 700; color: var(--ink); }
+  h1 .jev { color: var(--accent); }
+  .tagline { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; }
+  h3 { font-size: 13px; margin: 12px 0 4px; font-weight: 600; color: var(--ink-2); }
+  button:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .spacer { flex: 1; }
+  .live { color: var(--muted); font-size: 12px; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+  .seg button { font: inherit; font-size: 12px; color: var(--ink-2); background: none; border: 0; padding: 5px 10px; cursor: pointer; }
+  .seg button:hover { background: var(--wash); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 0; box-shadow: 0 3px 14px var(--shadow); }
+  .cols { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .note { font-size: 12px; color: var(--muted); margin: 0 0 12px; }
+  .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+
+  .status { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; padding: 10px 16px 12px; font-size: 13px; color: var(--ink-2); border-top: 1px solid var(--grid); background: var(--wash); }
+  .status .pill { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--ink); }
+  .status .pill::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--state); }
+  .st-ok { --state: var(--answered); } .st-paused { --state: var(--abstain); } .st-failing, .st-offline { --state: var(--failed); }
+
+  .tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  .tile { padding: 12px 14px; border-top: 3px solid var(--c, var(--accent)); }
+  .tile .label { font-size: 12px; color: var(--ink-2); }
+  .tile .value { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .tile .value small { font-size: 14px; font-weight: 500; color: var(--ink-2); margin-left: 6px; }
+  .tile .sub { font-size: 12px; color: var(--muted); }
+
+  .o-answered { --c: var(--answered); } .o-partial { --c: var(--partial); } .o-abstain { --c: var(--abstain); }
+  .o-failed { --c: var(--failed); } .o-skipped { --c: var(--skipped); }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; background: var(--c); }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0 0; font-size: 12px; color: var(--ink-2); }
+  .share { display: flex; gap: 2px; height: 14px; border-radius: 4px; overflow: hidden; background: var(--wash); margin-top: 12px; }
+  .share span { min-width: 2px; background: var(--c); }
+
+  .bars { position: relative; display: flex; align-items: flex-end; gap: 2px; height: 120px; border-bottom: 1px solid var(--axis); margin-top: 14px; }
+  .bars .col { flex: 1; height: 100%; display: flex; flex-direction: column-reverse; align-items: center; gap: 1px; }
+  .bars .col span { width: 100%; max-width: 28px; background: var(--c); }
+  .bars .col span:last-child { border-radius: 3px 3px 0 0; }
+  .bars .col:hover, .bars .col:focus-visible { background: var(--wash); }
+  .bars .mark { position: absolute; top: -4px; bottom: 0; border-left: 2px dashed var(--ink-2); pointer-events: none; }
+  .bars .mark b { position: absolute; top: -14px; left: 4px; font-size: 11px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+  #confidence { margin-top: 26px; }
+  .axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 4px; }
+  #tip { position: fixed; z-index: 2; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); display: none; }
+  #tip div { display: flex; gap: 12px; justify-content: space-between; color: var(--ink-2); }
+  #tip b { color: var(--ink); }
+
+  .toggle-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 16px; }
+  .toggle-bar .note { margin: 0; flex: 1 1 220px; }
+  .switch { display: inline-flex; align-items: center; gap: 10px; font: inherit; font-weight: 650; color: var(--ink); background: none; border: 0; padding: 4px 0; cursor: pointer; }
+  .switch .track { position: relative; flex: none; width: 40px; height: 22px; border-radius: 999px; background: var(--axis); transition: background 0.15s; }
+  .switch .knob { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); transition: transform 0.15s; }
+  .switch[aria-checked="true"] .track { background: var(--accent); }
+  .switch[aria-checked="true"] .knob { transform: translateX(18px); }
+  @media (prefers-reduced-motion: reduce) { .switch .track, .switch .knob { transition: none; } }
+
+  .filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+  .filters button { font: inherit; font-size: 12px; color: var(--ink-2); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+  .filters button:hover { background: var(--wash); }
+  .more { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 12px; margin: 28px 0 0; font-size: 12px; color: var(--muted); }
+  .more button { font: inherit; font-size: 13px; font-weight: 600; color: var(--accent); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 16px; cursor: pointer; }
+  .more button:hover { background: var(--wash); }
+  .filters button[aria-pressed="true"] { border-color: var(--accent); color: var(--ink); background: var(--wash); font-weight: 600; }
+  .scroll { overflow-x: auto; margin: 0 -16px -16px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 8px; border-top: 1px solid var(--grid); vertical-align: middle; }
+  th { color: var(--ink-2); font-weight: 600; font-size: 12px; border-top: 0; white-space: nowrap; }
+  th:first-child, td:first-child { padding-left: 16px; }
+  th:last-child, td:last-child { padding-right: 16px; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  td.nowrap { white-space: nowrap; }
+  tr.row { cursor: pointer; }
+  tr.row:hover td, tr.row.open td { background: var(--wash); }
+  tr.row td:first-child::before { content: "▸"; display: inline-block; width: 14px; color: var(--muted); }
+  tr.row.open td:first-child::before { content: "▾"; }
+  .sub { font-size: 11.5px; color: var(--muted); }
+  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--ink); }
+  .badge::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+  code, .mono { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .answer { font-weight: 600; }
+  .meter { display: flex; align-items: center; gap: 8px; min-width: 130px; }
+  .meter .track { position: relative; flex: 1; height: 8px; border-radius: 4px; background: var(--wash); min-width: 60px; }
+  .meter .fill { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--c); }
+  .meter .limit { position: absolute; top: -3px; bottom: -3px; border-left: 2px solid var(--ink-2); }
+  .meter b { font-weight: 600; min-width: 34px; text-align: right; }
+  tr.detail td { background: var(--plane); padding: 4px 16px 16px 38px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; font-size: 12.5px; }
+  .kv dt { color: var(--ink-2); }
+  .kv dd { margin: 0; overflow-wrap: anywhere; }
+  .q { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-top: 8px; background: var(--surface); }
+  .opts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .opts span { font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid var(--border); border-radius: 4px; padding: 0 6px; color: var(--ink-2); }
+  .opts span.chosen { border-color: var(--answered); color: var(--ink); font-weight: 700; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin: 4px 0 0; max-height: 360px; overflow: auto; }
+
+  details.advanced > summary { cursor: pointer; font-weight: 650; }
+  details.advanced[open] > summary { margin-bottom: 12px; }
+  .compare { width: 100%; border-collapse: collapse; }
+  .compare th, .compare td { text-align: right; }
+  .compare th:first-child, .compare td:first-child { text-align: left; color: var(--ink-2); font-weight: 400; }
+</style>
+</head>
+<body>
+<main>
+  <header class="card masthead">
+    <div class="brand-row">
+      <div class="brand">
+        <svg viewBox="0 0 36 36" aria-hidden="true" focusable="false">
+          <rect width="36" height="36" rx="9" fill="var(--accent)"/>
+          <path d="M8 26V17M14 26V12M20 26V15M26 26V9" stroke="var(--on-accent)" stroke-width="3" stroke-linecap="round"/>
+          <path d="M7 11.5C12 6 20 5.5 29 7.5" stroke="var(--brand)" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+        </svg>
+        <div>
+          <h1>Master-<span class="jev">JEV</span> Hook</h1>
+          <p class="tagline" data-i18n="tagline"></p>
+        </div>
+      </div>
+      <span class="spacer"></span>
+      <span class="live" id="live"></span>
+      <div class="controls">
+        <div class="seg" id="clients" role="group"></div>
+        <div class="seg" id="langs" role="group"></div>
+        <div class="seg" id="themes" role="group"></div>
+      </div>
+    </div>
+    <div class="status" id="status" aria-live="polite"></div>
+  </header>
+
+  <section class="cols">
+    <div class="card">
+      <h2 data-i18n="hourlyTitle"></h2>
+      <p class="note" data-i18n="hourlyNote"></p>
+      <div class="share" id="share"></div>
+      <div class="legend" id="legend"></div>
+      <div class="bars" id="hourly"></div>
+      <div class="axis" id="hourly-axis"></div>
+    </div>
+    <div class="card">
+      <h2 data-i18n="confTitle"></h2>
+      <p class="note" id="conf-note"></p>
+      <div class="legend" id="conf-legend"></div>
+      <div class="bars" id="confidence"></div>
+      <div class="axis" id="conf-axis"></div>
+    </div>
+  </section>
+
+  <section class="tiles" id="tiles"></section>
+
+  <section class="card toggle-bar">
+    <button type="button" class="switch" id="rows-switch" role="switch" aria-checked="false" aria-controls="requests">
+      <span class="track" aria-hidden="true"><span class="knob"></span></span>
+      <span data-i18n="rowsSwitch"></span>
+    </button>
+    <p class="note" data-i18n="rowsSwitchNote"></p>
+  </section>
+
+  <section class="card" id="requests" hidden>
+    <h2 data-i18n="rowsTitle"></h2>
+    <p class="note" data-i18n="rowsNote"></p>
+    <div class="filters" id="filters" role="group"></div>
+    <div class="scroll"><table>
+      <thead><tr id="rows-head"></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+    <div class="more" id="more" hidden></div>
+  </section>
+
+  <details class="card advanced" id="advanced">
+    <summary data-i18n="advTitle"></summary>
+    <p class="note" data-i18n="advNote"></p>
+    <h3 data-i18n="compareTitle"></h3>
+    <p class="note" id="compare-note"></p>
+    <div class="scroll"><table class="compare" id="compare"></table></div>
+  </details>
+</main>
+<div id="tip" role="status"></div>
+
+<script>
+"use strict";
+// Everything shown here comes from /dashboard/events, which carries request metadata only. Names
+// in it (models, tools, reasons, question ids) are still someone else's strings: they reach the
+// DOM through textContent, never innerHTML.
+
+const POLL_MS = 2000;
+const WINDOW_MS = 24 * 3600e3;
+const HOUR = 3600e3;
+const PAGE_ROWS = 30; // Rows added per "show more"; keeps the page short.
+const KEPT_PER_ROUTER = 1000;
+const OUTCOMES = ["answered", "partial", "abstain", "failed", "skipped"];
+// Why a tool-routing request did not use JEV's pick: [who, key into the reason texts].
+const ASKED_NO_DECISION = new Set(["low_confidence", "jev_answers_disagree"]);
+const FAILURES = new Set(["jev_error", "jev_unexpected_answer", "router_error"]);
+const ASKED = new Set([...ASKED_NO_DECISION, "no_tool_needed", "hosted_tool_selected", "namespaced_tool_selected", "jev_unknown_tool", "upstream_rejected"]);
+
+const T = {
+  "pt-BR": {
+    tagline: "Decisões do JEV para o hook, ao vivo",
+    rowsSwitch: "Mostrar pedidos recebidos", rowsSwitchTitle: "Mostrar ou esconder a lista de pedidos recebidos",
+    rowsSwitchNote: "A lista detalhada, 30 pedidos por vez. Clique num pedido para ver as perguntas e a resposta do JEV.",
+    connecting: "conectando…", live: (t) => `ao vivo · atualizado ${t}`, disconnected: "sem conexão — tentando de novo",
+    allClients: "Todos", client: "Cliente", language: "Idioma", theme: "Tema", light: "☀ Claro", dark: "☾ Escuro",
+    langTitle: "Mudar o idioma do painel", themeTitle: "Mudar o tema do painel", clientTitle: (c) => `Mostrar só: ${c}`,
+    window: "Últimas 24 horas",
+    online: "Online", offline: "Offline", paused: "JEV pausado", failing: "JEV falhando",
+    offlineWhy: "O gateway não está respondendo.",
+    pausedWhy: "O roteamento pelo JEV está desligado neste gateway.",
+    failingWhy: (r) => `A última consulta ao JEV falhou (${r}).`,
+    model: (m, p) => `modelo ${m}${p ? " via " + p : ""}`, minConf: (v) => `limiar mínimo ${v}`,
+    upFor: (d) => `no ar há ${d}`, lastAt: (d) => `último pedido há ${d}`, noneYet: "nenhum pedido ainda",
+    outcome: { answered: "Respondida", partial: "Parcial", abstain: "Sem decisão", failed: "Falha", skipped: "Não enviada ao JEV" },
+    outcomeLong: {
+      answered: "o JEV respondeu com confiança acima do limiar",
+      partial: "o JEV respondeu parte das perguntas",
+      abstain: "o JEV se absteve: confiança abaixo do limiar ou evidência insuficiente",
+      failed: "a consulta ao JEV deu erro ou expirou",
+      skipped: "o gateway não consultou o JEV (ex.: pedido sem ferramentas, JEV pausado)",
+    },
+    tReceived: "Pedidos recebidos", tReceivedSub: (n) => `${n} por hora em média`,
+    tAnswered: "Respondidas pelo JEV", tAbstain: "Sem decisão", tAbstainSub: "confiança abaixo do limiar",
+    tFailed: "Falhas", tFailedSub: "erro ou tempo esgotado", tPartial: "Parciais", tPartialSub: "só parte respondida",
+    tSkipped: "Não enviadas ao JEV", tSkippedSub: "o gateway não consultou",
+    tConf: "Confiança média", tConfSub: (min, lim) => `das respondidas · mín. ${min} · limiar ${lim}`,
+    tLatency: "Tempo de resposta do JEV", tLatencySub: (p) => `p95 ${p}`, tTokens: "Tokens do JEV", tTokensSub: (i, o) => `${i} entrada · ${o} saída`,
+    ofTotal: (p) => `${p} do total`,
+    hourlyTitle: "Pedidos por hora", hourlyNote: "Cada barra é uma hora das últimas 24; as cores mostram o resultado.",
+    confTitle: "Grau de confiança das respostas",
+    confNote: "Confiança que o JEV declarou em cada pedido (na pergunta mais fraca). A linha tracejada é o limiar: abaixo dele, o JEV não decide.",
+    confNoneYet: "Nenhuma resposta com confiança nas últimas 24 h.", threshold: (v) => `limiar ${v}`,
+    requests: (n) => `${n} pedido${n === 1 ? "" : "s"}`, now: "agora",
+    rowsTitle: "Pedidos recebidos", rowsNote: "Mais recentes primeiro. Clique num pedido para ver as perguntas, as opções e a resposta completa do JEV.",
+    all: "Todos",
+    cols: ["Hora", "Pedido", "Pergunta", "Resultado", "Resposta do JEV", "Confiança", "Tempo", "Tokens"],
+    noRows: "Nenhum pedido nas últimas 24 h.", noRowsFilter: "Nenhum pedido com esse resultado nas últimas 24 h.",
+    showing: (n, total) => `Mostrando ${n} de ${total}`, showMore: (n) => `Mostrar mais ${n}`, showMoreTitle: "Carregar os próximos pedidos, mais antigos",
+    kinds: { decide: "Decisão", context: "Contexto", simulate: "Simulação", tool: "Escolha de ferramenta", other: "Pedido" },
+    noAnswer: "sem resposta", belowLimit: (c, l) => `${c} < limiar ${l}`, yes: (p) => `sim ${p}`, score: (s) => `nota ${s}`,
+    noTool: "nenhuma ferramenta", llmDecided: (t) => `sugeriu ${t}; o LLM decidiu`,
+    dRequest: "Pedido recebido", dPath: "Rota", dKind: "Tipo", dClient: "Cliente", dModel: "Modelo", dTools: "Ferramentas oferecidas",
+    dResult: "Resultado", dWhy: "Motivo", dThreshold: "Limiar exigido", dCalls: "Consultas ao JEV", dTokens: "Tokens do JEV",
+    dLatency: "Tempo do JEV", dTotal: "Tempo total", dDelivery: "Entrega", dQuestions: "Perguntas feitas ao JEV",
+    dOptions: "Opções", dAnswer: "Resposta", dConf: "confiança", dNoOptions: "resposta sim/não (probabilidade de sim, 0–1)",
+    dText: "Texto do pedido", dNoText: "O texto do pedido não é registrado por privacidade. Para vê-lo aqui, inicie o gateway com JEV_INSPECT_INPUTS=true.",
+    dJevReq: "Consultas enviadas ao JEV", dRaw: "Resultado bruto",
+    delivery: { returned: "resultado devolvido a quem pediu", simulated: "simulação — resultado devolvido", applied: "avaliação inserida no pedido ao modelo", notApplied: "pedido seguiu ao modelo sem a avaliação" },
+    reasons: {
+      no_tools: "O pedido não trazia ferramentas; não havia o que escolher.",
+      no_messages: "O pedido não tinha conversa para decidir.",
+      previous_response_id: "A conversa está no provedor (previous_response_id); o gateway não a vê.",
+      non_function_tools: "Há ferramentas que não são funções simples.",
+      malformed_tools: "Uma ferramenta não tem nome ou tipo.",
+      unsafe_tool_name: "Um nome de ferramenta tem caracteres inválidos.",
+      unreadable_request: "O corpo não tem o formato documentado da API.",
+      too_many_tools: "Ferramentas demais para o gateway filtrar.",
+      duplicate_tool_names: "Duas ferramentas têm o mesmo nome.",
+      reserved_tool_name: "Uma ferramenta usa o nome reservado no_tool_needed.",
+      tool_choice_already_decided: "O cliente já fixou tool_choice.",
+      routing_disabled: "O JEV estava pausado; o pedido foi direto ao LLM.",
+      disabled_by_header: "O cliente enviou x-jev-gateway: off.",
+      unparseable_body: "O corpo não era JSON legível.",
+      low_confidence: "A confiança do JEV ficou abaixo do limiar.",
+      jev_answers_disagree: "As respostas do JEV se contradisseram.",
+      no_tool_needed: "O JEV disse que nenhuma ferramenta é necessária.",
+      hosted_tool_selected: "O JEV escolheu uma ferramenta do provedor, que não pode ser forçada.",
+      namespaced_tool_selected: "O JEV escolheu uma ferramenta com namespace, que não pode ser forçada.",
+      jev_unknown_tool: "O JEV citou uma ferramenta que não existe na lista.",
+      upstream_rejected: "O provedor recusou o pedido reescrito; o original foi reenviado.",
+      jev_error: "A chamada ao JEV deu erro ou expirou. Verifique TYPESAFE_API_KEY e a rede.",
+      jev_unexpected_answer: "A resposta do JEV veio sem as respostas esperadas.",
+      router_error: "Erro interno do gateway; o pedido original seguiu adiante.",
+      decision_only: "Só decisão: o resultado volta para quem pediu.",
+    },
+    advTitle: "Avançado", advNote: "Só se aplica ao roteamento de ferramentas de clientes LLM (não ao MCP). Não afeta as decisões acima.",
+    compareTitle: "Tokens do LLM: com JEV × JEV pausado",
+    compareRows: ["Pedidos ao LLM medidos", "Tokens de entrada / pedido", "…em cache", "Tokens de saída / pedido", "…de raciocínio", "Segundos / pedido", "Total de tokens de entrada", "Total de tokens de saída"],
+    compareCols: ["Com JEV", "JEV pausado", "Diferença"],
+    compareNote: "Médias por pedido nas últimas 24 h. Só faz sentido se os dois lados fizeram trabalho parecido.",
+    compareEmpty: "Sem pedidos de LLM medidos nas últimas 24 h.",
+    ago: (v, u) => `${v} ${u}`, units: ["s", "min", "h", "d"],
+  },
+  en: {
+    tagline: "JEV decisions for the hook, live",
+    rowsSwitch: "Show requests received", rowsSwitchTitle: "Show or hide the list of requests received",
+    rowsSwitchNote: "The detailed list, 30 requests at a time. Click a request to see the questions and JEV's answer.",
+    connecting: "connecting…", live: (t) => `live · refreshed ${t}`, disconnected: "not connected — retrying",
+    allClients: "All", client: "Client", language: "Language", theme: "Theme", light: "☀ Light", dark: "☾ Dark",
+    langTitle: "Change the dashboard language", themeTitle: "Change the dashboard theme", clientTitle: (c) => `Show only: ${c}`,
+    window: "Last 24 hours",
+    online: "Online", offline: "Offline", paused: "JEV paused", failing: "JEV failing",
+    offlineWhy: "The gateway isn't answering.",
+    pausedWhy: "JEV routing is switched off on this gateway.",
+    failingWhy: (r) => `The latest JEV call failed (${r}).`,
+    model: (m, p) => `model ${m}${p ? " via " + p : ""}`, minConf: (v) => `minimum threshold ${v}`,
+    upFor: (d) => `up for ${d}`, lastAt: (d) => `last request ${d} ago`, noneYet: "no requests yet",
+    outcome: { answered: "Answered", partial: "Partial", abstain: "No decision", failed: "Failed", skipped: "Not sent to JEV" },
+    outcomeLong: {
+      answered: "JEV answered with confidence above the threshold",
+      partial: "JEV answered some of the questions",
+      abstain: "JEV abstained: confidence below the threshold or not enough evidence",
+      failed: "the JEV call errored or timed out",
+      skipped: "the gateway didn't ask JEV (e.g. no tools in the request, JEV paused)",
+    },
+    tReceived: "Requests received", tReceivedSub: (n) => `${n} per hour on average`,
+    tAnswered: "Answered by JEV", tAbstain: "No decision", tAbstainSub: "confidence below threshold",
+    tFailed: "Failures", tFailedSub: "error or timeout", tPartial: "Partial", tPartialSub: "only some answered",
+    tSkipped: "Not sent to JEV", tSkippedSub: "the gateway didn't ask",
+    tConf: "Average confidence", tConfSub: (min, lim) => `of answered · min ${min} · threshold ${lim}`,
+    tLatency: "JEV response time", tLatencySub: (p) => `p95 ${p}`, tTokens: "JEV tokens", tTokensSub: (i, o) => `${i} in · ${o} out`,
+    ofTotal: (p) => `${p} of total`,
+    hourlyTitle: "Requests per hour", hourlyNote: "Each bar is one of the last 24 hours; colours show the outcome.",
+    confTitle: "Confidence of the answers",
+    confNote: "The confidence JEV reported for each request (on its weakest question). The dashed line is the threshold: below it, JEV doesn't decide.",
+    confNoneYet: "No answers with a confidence in the last 24 h.", threshold: (v) => `threshold ${v}`,
+    requests: (n) => `${n} request${n === 1 ? "" : "s"}`, now: "now",
+    rowsTitle: "Requests received", rowsNote: "Newest first. Click a request to see the questions, the options and JEV's full answer.",
+    all: "All",
+    cols: ["Time", "Request", "Question", "Outcome", "JEV's answer", "Confidence", "Time taken", "Tokens"],
+    noRows: "No requests in the last 24 h.", noRowsFilter: "No requests with this outcome in the last 24 h.",
+    showing: (n, total) => `Showing ${n} of ${total}`, showMore: (n) => `Show ${n} more`, showMoreTitle: "Load the next, older requests",
+    kinds: { decide: "Decision", context: "Context", simulate: "Simulation", tool: "Tool choice", other: "Request" },
+    noAnswer: "no answer", belowLimit: (c, l) => `${c} < threshold ${l}`, yes: (p) => `yes ${p}`, score: (s) => `score ${s}`,
+    noTool: "no tool", llmDecided: (t) => `suggested ${t}; the LLM decided`,
+    dRequest: "Request received", dPath: "Route", dKind: "Kind", dClient: "Client", dModel: "Model", dTools: "Tools offered",
+    dResult: "Outcome", dWhy: "Reason", dThreshold: "Threshold required", dCalls: "JEV calls", dTokens: "JEV tokens",
+    dLatency: "JEV time", dTotal: "Total time", dDelivery: "Delivery", dQuestions: "Questions asked to JEV",
+    dOptions: "Options", dAnswer: "Answer", dConf: "confidence", dNoOptions: "yes/no answer (probability of yes, 0–1)",
+    dText: "Request text", dNoText: "The request text isn't logged, for privacy. To see it here, start the gateway with JEV_INSPECT_INPUTS=true.",
+    dJevReq: "Calls sent to JEV", dRaw: "Raw result",
+    delivery: { returned: "result returned to the caller", simulated: "simulation — result returned", applied: "assessment added to the model request", notApplied: "request went on to the model without the assessment" },
+    reasons: {
+      no_tools: "The request carried no tools, so there was nothing to choose.",
+      no_messages: "The request had no conversation to decide on.",
+      previous_response_id: "The conversation lives upstream (previous_response_id); the gateway can't see it.",
+      non_function_tools: "Some tools aren't plain functions.",
+      malformed_tools: "A tool has no name or no type.",
+      unsafe_tool_name: "A tool name has invalid characters.",
+      unreadable_request: "The body isn't in the API's documented shape.",
+      too_many_tools: "Too many tools for the gateway to shortlist.",
+      duplicate_tool_names: "Two tools share a name.",
+      reserved_tool_name: "A tool uses the reserved name no_tool_needed.",
+      tool_choice_already_decided: "The client already fixed tool_choice.",
+      routing_disabled: "JEV was paused; the request went straight to the LLM.",
+      disabled_by_header: "The client sent x-jev-gateway: off.",
+      unparseable_body: "The body wasn't readable JSON.",
+      low_confidence: "JEV's confidence was below the threshold.",
+      jev_answers_disagree: "JEV's answers contradicted each other.",
+      no_tool_needed: "JEV said no tool is needed.",
+      hosted_tool_selected: "JEV picked a provider-run tool, which can't be forced.",
+      namespaced_tool_selected: "JEV picked a namespaced tool, which can't be forced.",
+      jev_unknown_tool: "JEV named a tool that isn't in the list.",
+      upstream_rejected: "Upstream refused the rewritten request; the original was replayed.",
+      jev_error: "The JEV call errored or timed out. Check TYPESAFE_API_KEY and the network.",
+      jev_unexpected_answer: "JEV's reply lacked the expected answers.",
+      router_error: "The gateway hit an internal error and sent the original request on.",
+      decision_only: "Decision only: the result goes back to the caller.",
+    },
+    advTitle: "Advanced", advNote: "Only applies to tool routing for LLM clients (not MCP). Doesn't affect the decisions above.",
+    compareTitle: "LLM tokens: with JEV × JEV paused",
+    compareRows: ["LLM requests metered", "Input tokens / request", "…of which cached", "Output tokens / request", "…of which reasoning", "Seconds / request", "Total input tokens", "Total output tokens"],
+    compareCols: ["With JEV", "JEV paused", "Difference"],
+    compareNote: "Per-request averages over the last 24 h. Only meaningful when both sides did similar work.",
+    compareEmpty: "No metered LLM requests in the last 24 h.",
+    ago: (v, u) => `${v} ${u}`, units: ["s", "min", "h", "d"],
+  },
+};
+
+const params = new URLSearchParams(location.search);
+const key = params.get("key");
+const ownPort = location.port || (location.protocol === "https:" ? "443" : "80");
+// `?peers=8795,8796` adds other local routers to the same page.
+const ports = new Set([ownPort, ...(params.get("peers") ?? "").split(",").filter(Boolean)]);
+const sources = [...ports].map((port) => ({
+  port,
+  own: port === ownPort,
+  // Another router has its own key, if any; ours is only ever sent back to where it came from.
+  url: port === ownPort ? "/dashboard/events?" + (key ? "key=" + encodeURIComponent(key) + "&" : "") : `${location.protocol}//${location.hostname}:${port}/dashboard/events?`,
+  events: [], lastSeq: 0, router: undefined, up: false, seen: false, misses: 0,
+}));
+
+// Browser storage is a convenience only: it may be missing or throw.
+const stored = (name) => { try { return localStorage.getItem(name); } catch { return null; } };
+const store = (name, value) => { try { localStorage.setItem(name, value); } catch { /* not kept */ } };
+const view = {
+  client: "all",
+  outcome: "all",
+  lang: stored("master-jev-dashboard-lang") === "en" ? "en" : "pt-BR",
+  theme: ["light", "dark"].includes(stored("master-jev-dashboard-theme")) ? stored("master-jev-dashboard-theme") : undefined,
+  open: new Set(),
+  limit: PAGE_ROWS,
+  rows: stored("master-jev-dashboard-rows") === "on", // "Requests received" stays hidden until switched on.
+};
+let signature = "";
+const t = () => T[view.lang];
+
+const $ = (id) => document.getElementById(id);
+function h(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [name, value] of Object.entries(attrs ?? {})) if (value !== undefined && value !== false) node.setAttribute(name, value);
+  node.append(...kids(children));
+  return node;
+}
+/** Children minus the gaps left by `cond && node`. */
+function kids(list) {
+  return list.flat().filter((child) => child !== undefined && child !== null && child !== false && child !== "");
+}
+
+const at = (event) => Date.parse(event.time);
+const int = (n) => Math.round(n).toLocaleString(view.lang);
+const dec = (n) => n.toLocaleString(view.lang, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pct = (part, whole) => (whole ? Math.round((100 * part) / whole) + "%" : "–");
+const ms = (n) => (n >= 10e3 ? (n / 1000).toLocaleString(view.lang, { maximumFractionDigits: 1 }) + " s" : int(n) + " ms");
+const clock = (time, withDate) => new Date(time).toLocaleString(view.lang, withDate ? { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" } : { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const hourLabel = (time) => new Date(time).toLocaleTimeString(view.lang, { hour: "2-digit", minute: "2-digit" });
+function ago(span) {
+  const s = Math.max(0, Math.round(span / 1000));
+  const [us, umin, uh, ud] = t().units;
+  if (s < 90) return t().ago(s, us);
+  if (s < 90 * 60) return t().ago(Math.round(s / 60), umin);
+  if (s < 36 * 3600) return t().ago(Math.round(s / 3600), uh);
+  return t().ago(Math.round(s / 86400), ud);
+}
+const reasonKey = (reason) => ["jev_error", "router_error", "upstream_rejected"].find((prefix) => reason.startsWith(prefix)) ?? reason;
+const baseline = (event) => event.reason === "routing_disabled";
+
+/** One word for what happened to a request, whether it came from the MCP tools or from an LLM client. */
+function outcome(event) {
+  const context = event.context;
+  if (context) return { accepted: "answered", partial: "partial", abstain: "abstain", fallback: "failed" }[context.status] ?? "skipped";
+  if (event.mode !== "passthrough") return "answered";
+  const reason = reasonKey(event.reason ?? "");
+  if (FAILURES.has(reason)) return "failed";
+  if (ASKED_NO_DECISION.has(reason)) return "abstain";
+  if (ASKED.has(reason)) return "answered";
+  return "skipped";
+}
+
+/** JEV's answers in one request: [{ id, type, status, choice, score, noul, confidence }]. */
+function answers(event) {
+  const context = event.context;
+  if (context?.workflow) return Object.entries(context.workflow.answers).map(([id, a]) => ({ id, ...a }));
+  if (context) return Object.entries(context.assessments ?? {}).map(([id, a]) => ({ id, type: a.probability === undefined ? "choice" : "noul", status: a.status === "accepted" ? "ok" : "abstain", choice: a.choice, noul: a.probability, confidence: a.confidence }));
+  if (event.jev || event.tool) return [{ id: "tool", type: "choice", status: outcome(event) === "abstain" ? "abstain" : "ok", choice: event.tool ?? event.jev?.choice, confidence: event.confidence ?? event.jev?.confidence }];
+  return [];
+}
+
+/** The confidence a request stands on: that of its weakest Choice/Score answer. Noul is a probability, not a confidence. */
+function confidence(event) {
+  const values = answers(event).map((a) => a.confidence).filter((value) => typeof value === "number");
+  return values.length ? Math.min(...values) : undefined;
+}
+const sourceOf = (event) => sources.find((source) => source.port === event.port);
+const threshold = (event) => event.context?.threshold ?? event.context?.workflow?.threshold ?? sourceOf(event)?.router?.minConfidence;
+const jevLatency = (event) => event.context?.latencyMs ?? event.jev?.latencyMs;
+const jevTokens = (event) => (event.context ? event.context.inputTokens + event.context.outputTokens : event.jev?.inputTokens);
+const questionIds = (event) => (event.context ? event.context.questions.map((q) => q.id) : event.jev || event.tool ? ["tool"] : []);
+
+function requestKind(event) {
+  if (event.path === "/master/decide") return "decide";
+  if (event.path === "/master/context") return "context";
+  if (event.path === "/router/decide") return "simulate";
+  if (event.path.startsWith("/v1/")) return "tool";
+  return "other";
+}
+
+function answerText(a) {
+  if (a.status !== "ok") return undefined;
+  if (a.type === "noul" && typeof a.noul === "number") return t().yes(dec(a.noul));
+  if (a.type === "score" && a.score != null) return t().score(a.score);
+  if (a.choice === "no_tool_needed") return t().noTool;
+  return a.choice ?? undefined;
+}
+
+async function poll(source) {
+  // A port nobody ever answered on is probably just not in use: look again, but rarely.
+  if (!source.own && !source.seen && source.misses++ % 5 !== 0) return;
+  try {
+    const response = await fetch(source.url + "since=" + source.lastSeq, { signal: AbortSignal.timeout(1500) });
+    if (!response.ok) throw new Error(String(response.status));
+    const data = await response.json();
+    if (source.router && source.router.startedAt !== data.router.startedAt && source.lastSeq > 0) {
+      // The router restarted and its numbering with it: what we asked for makes no sense to it.
+      Object.assign(source, { events: [], lastSeq: 0, router: data.router });
+      return poll(source);
+    }
+    source.router = data.router;
+    source.events = source.events.concat(data.events.map((event) => ({ ...event, client: data.router.client, port: source.port }))).slice(-KEPT_PER_ROUTER);
+    source.lastSeq = data.events.length ? data.events.at(-1).seq : source.lastSeq;
+    source.up = source.seen = true;
+  } catch {
+    source.up = false;
+  }
+}
+
+const rerender = () => { signature = ""; render(); };
+
+// ---- header ----------------------------------------------------------------------------------
+
+function applyTheme() {
+  if (view.theme) document.documentElement.dataset.theme = view.theme;
+  else delete document.documentElement.dataset.theme;
+}
+const effectiveTheme = () => view.theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+
+function segButton(label, pressed, title, press) {
+  const node = h("button", { type: "button", "aria-pressed": String(pressed), title }, label);
+  node.addEventListener("click", () => { press(); rerender(); });
+  return node;
+}
+
+function renderControls() {
+  const tr = t();
+  const clients = [...new Set(sources.filter((source) => source.router).map((source) => source.router.client))];
+  $("clients").hidden = clients.length < 2;
+  $("clients").setAttribute("aria-label", tr.client);
+  $("clients").replaceChildren(...["all", ...clients].map((name) => segButton(name === "all" ? tr.allClients : name, view.client === name, tr.clientTitle(name === "all" ? tr.allClients : name), () => { view.client = name; view.limit = PAGE_ROWS; })));
+  $("langs").setAttribute("aria-label", tr.language);
+  $("langs").replaceChildren(...[["pt-BR", "PT-BR"], ["en", "EN"]].map(([lang, label]) => segButton(label, view.lang === lang, tr.langTitle, () => { view.lang = lang; store("master-jev-dashboard-lang", lang); })));
+  $("themes").setAttribute("aria-label", tr.theme);
+  $("themes").replaceChildren(...[["light", tr.light], ["dark", tr.dark]].map(([theme, label]) => segButton(label, effectiveTheme() === theme, tr.themeTitle, () => { view.theme = theme; store("master-jev-dashboard-theme", theme); applyTheme(); })));
+  $("rows-switch").setAttribute("aria-checked", String(view.rows));
+  $("rows-switch").title = tr.rowsSwitchTitle;
+  $("requests").hidden = !view.rows;
+  document.documentElement.lang = view.lang;
+  for (const node of document.querySelectorAll("[data-i18n]")) node.textContent = tr[node.dataset.i18n];
+}
+
+function renderStatus(now) {
+  const tr = t();
+  $("status").replaceChildren(...kids(sources.filter((source) => source.seen || source.own).flatMap((source, index) => {
+    const router = source.router;
+    const events = source.events;
+    const lastCall = [...events].reverse().find((event) => outcome(event) !== "skipped");
+    const [state, label, why] = !source.seen ? ["paused", tr.connecting, undefined]
+      : !source.up ? ["offline", tr.offline, tr.offlineWhy]
+      : router?.routing === false ? ["paused", tr.paused, tr.pausedWhy]
+      : lastCall && outcome(lastCall) === "failed" ? ["failing", tr.failing, tr.failingWhy(lastCall.context?.reason ?? lastCall.reason ?? "?")]
+      : ["ok", tr.online, undefined];
+    const last = events.at(-1);
+    return [
+      index > 0 && h("span", { style: "flex-basis:100%;height:0" }),
+      h("span", { class: `pill st-${state}` }, `${router?.client ?? "gateway"} :${source.port} · ${label}`),
+      h("span", {}, tr.window),
+      why && h("span", {}, why),
+      router && h("span", {}, tr.model(router.jevModel, router.jevProvider)),
+      router && h("span", {}, tr.minConf(dec(router.minConfidence))),
+      router && source.up && h("span", {}, tr.upFor(ago(now - Date.parse(router.startedAt)))),
+      h("span", {}, last ? tr.lastAt(ago(now - at(last))) : tr.noneYet),
+    ];
+  })));
+}
+
+// ---- counters --------------------------------------------------------------------------------
+
+function renderTiles(events, now) {
+  const tr = t();
+  const count = Object.fromEntries(OUTCOMES.map((name) => [name, 0]));
+  for (const event of events) count[outcome(event)]++;
+  const answered = events.filter((event) => outcome(event) === "answered" || outcome(event) === "partial");
+  const confs = answered.map(confidence).filter((value) => value !== undefined);
+  const latencies = events.map(jevLatency).filter((value) => typeof value === "number" && value > 0).sort((a, b) => a - b);
+  const mean = (values) => values.reduce((total, value) => total + value, 0) / values.length;
+  const tokensIn = events.reduce((total, event) => total + (event.context?.inputTokens ?? event.jev?.inputTokens ?? 0), 0);
+  const tokensOut = events.reduce((total, event) => total + (event.context?.outputTokens ?? 0), 0);
+  const thresholds = [...new Set(events.map(threshold).filter((value) => value !== undefined))].sort();
+  const oldest = events.length ? Math.min(...events.map(at)) : now;
+  const hours = Math.max(1, Math.min(24, (now - oldest) / HOUR));
+
+  const tile = (cls, label, value, share, sub) => h("div", { class: `card tile ${cls}` },
+    h("div", { class: "label" }, label), h("div", { class: "value" }, value, share && h("small", {}, share)), h("div", { class: "sub" }, sub));
+  const outcomeTile = (name, label, sub) => tile(`o-${name}`, label, int(count[name]), pct(count[name], events.length), sub);
+  $("tiles").replaceChildren(...kids([
+    tile("", tr.tReceived, int(events.length), "", tr.tReceivedSub(dec(events.length / hours))),
+    outcomeTile("answered", tr.tAnswered, tr.outcomeLong.answered),
+    outcomeTile("abstain", tr.tAbstain, tr.tAbstainSub),
+    outcomeTile("failed", tr.tFailed, tr.tFailedSub),
+    count.partial ? outcomeTile("partial", tr.tPartial, tr.tPartialSub) : undefined,
+    count.skipped ? outcomeTile("skipped", tr.tSkipped, tr.tSkippedSub) : undefined,
+    tile("", tr.tConf, confs.length ? dec(mean(confs)) : "–", "", tr.tConfSub(confs.length ? dec(Math.min(...confs)) : "–", thresholds.length ? thresholds.map(dec).join(" / ") : "–")),
+    tile("", tr.tLatency, latencies.length ? ms(mean(latencies)) : "–", "", latencies.length ? tr.tLatencySub(ms(latencies[Math.min(latencies.length - 1, Math.floor(latencies.length * 0.95))])) : "–"),
+    tile("", tr.tTokens, int(tokensIn + tokensOut), "", tr.tTokensSub(int(tokensIn), int(tokensOut))),
+  ]));
+}
+
+// ---- charts ----------------------------------------------------------------------------------
+
+function showTip(anchor, rows) {
+  const tip = $("tip");
+  tip.replaceChildren(...rows.map(([label, value]) => h("div", {}, h("span", {}, label), h("b", {}, value))));
+  tip.style.display = "block";
+  const box = anchor.getBoundingClientRect();
+  tip.style.left = Math.max(8, Math.min(innerWidth - tip.offsetWidth - 8, box.left + box.width / 2 - tip.offsetWidth / 2)) + "px";
+  tip.style.top = Math.max(8, box.top - tip.offsetHeight - 6) + "px";
+}
+const hideTip = () => ($("tip").style.display = "none");
+
+/** A column of stacked segments, one per outcome, with a tooltip. */
+function stackColumn(counts, peak, title, ariaLabel) {
+  const col = h("div", { class: "col", tabindex: "0", "aria-label": ariaLabel },
+    ...OUTCOMES.filter((name) => counts[name]).map((name) => h("span", { class: `o-${name}`, style: `height:${(100 * counts[name]) / peak}%` })));
+  const total = OUTCOMES.reduce((sum, name) => sum + (counts[name] ?? 0), 0);
+  const show = () => showTip(col, [[title, int(total)], ...OUTCOMES.filter((name) => counts[name]).map((name) => [t().outcome[name], int(counts[name])])]);
+  col.addEventListener("pointerenter", show);
+  col.addEventListener("focus", show);
+  col.addEventListener("pointerleave", hideTip);
+  col.addEventListener("blur", hideTip);
+  return col;
+}
+
+function renderHourly(events, now) {
+  const tr = t();
+  const counts = Object.fromEntries(OUTCOMES.map((name) => [name, 0]));
+  for (const event of events) counts[outcome(event)]++;
+  const present = OUTCOMES.filter((name) => counts[name]);
+  $("share").replaceChildren(...present.map((name) => h("span", { class: `o-${name}`, style: `flex:${counts[name]}`, title: `${tr.outcome[name]}: ${counts[name]}` })));
+  $("legend").replaceChildren(...(present.length ? present : ["answered", "abstain", "failed"]).map((name) =>
+    h("span", { title: tr.outcomeLong[name] }, h("i", { class: `dot o-${name}` }), `${tr.outcome[name]} `, h("b", {}, `${int(counts[name])} · ${pct(counts[name], events.length)}`))));
+
+  // 24 whole-hour buckets, the last one being the current hour.
+  const first = Math.floor(now / HOUR) * HOUR - 23 * HOUR;
+  const buckets = Array.from({ length: 24 }, (_, index) => ({ start: first + index * HOUR, counts: {} }));
+  for (const event of events) {
+    const bucket = buckets[Math.floor((at(event) - first) / HOUR)];
+    if (bucket) bucket.counts[outcome(event)] = (bucket.counts[outcome(event)] ?? 0) + 1;
+  }
+  const totals = buckets.map((bucket) => OUTCOMES.reduce((sum, name) => sum + (bucket.counts[name] ?? 0), 0));
+  const peak = Math.max(1, ...totals);
+  $("hourly").replaceChildren(...buckets.map((bucket, index) => {
+    const title = `${hourLabel(bucket.start)} – ${hourLabel(bucket.start + HOUR)}`;
+    return stackColumn(bucket.counts, peak, title, `${title}: ${tr.requests(totals[index])}`);
+  }));
+  $("hourly-axis").replaceChildren(h("span", {}, hourLabel(first)), h("span", {}, hourLabel(first + 12 * HOUR)), h("span", {}, tr.now));
+}
+
+function renderConfidence(events) {
+  const tr = t();
+  // 0.05-wide bins from 0.40 up, everything lower in the first one.
+  const LOW = 0.4, STEP = 0.05, BINS = 12;
+  const bins = Array.from({ length: BINS }, () => ({}));
+  let any = 0;
+  for (const event of events) {
+    const value = confidence(event);
+    if (value === undefined) continue;
+    any++;
+    const index = Math.max(0, Math.min(BINS - 1, Math.floor((value - LOW + 1e-9) / STEP)));
+    bins[index][outcome(event)] = (bins[index][outcome(event)] ?? 0) + 1;
+  }
+  const peak = Math.max(1, ...bins.map((bin) => OUTCOMES.reduce((sum, name) => sum + (bin[name] ?? 0), 0)));
+  const label = (index) => (index === 0 ? `< ${dec(LOW + STEP)}` : `${dec(LOW + index * STEP)}–${dec(LOW + (index + 1) * STEP)}`);
+  const columns = bins.map((bin, index) => stackColumn(bin, peak, label(index), `${label(index)}: ${tr.requests(OUTCOMES.reduce((sum, name) => sum + (bin[name] ?? 0), 0))}`));
+  const thresholds = [...new Set(events.map(threshold).filter((value) => value !== undefined))];
+  const marks = thresholds.map((value) => {
+    const position = Math.max(0, Math.min(1, (value - LOW) / (STEP * BINS)));
+    return h("div", { class: "mark", style: `left:${100 * position}%` }, h("b", {}, tr.threshold(dec(value))));
+  });
+  $("confidence").replaceChildren(...columns, ...marks);
+  $("conf-note").textContent = any ? tr.confNote : tr.confNoneYet;
+  const shown = OUTCOMES.filter((name) => bins.some((bin) => bin[name]));
+  $("conf-legend").replaceChildren(...shown.map((name) => h("span", {}, h("i", { class: `dot o-${name}` }), tr.outcome[name])));
+  $("conf-axis").replaceChildren(h("span", {}, dec(LOW)), h("span", {}, dec(LOW + (STEP * BINS) / 2)), h("span", {}, dec(1)));
+}
+
+// ---- requests table ---------------------------------------------------------------------------
+
+function meter(event) {
+  const value = confidence(event);
+  if (value === undefined) return "–";
+  const limit = threshold(event);
+  const name = outcome(event);
+  return h("div", { class: `meter o-${name === "partial" ? "partial" : value >= (limit ?? 0) ? "answered" : "abstain"}`, title: limit === undefined ? dec(value) : `${dec(value)} · ${t().threshold(dec(limit))}` },
+    h("div", { class: "track" }, h("div", { class: "fill", style: `width:${100 * value}%` }), limit !== undefined && h("div", { class: "limit", style: `left:${100 * limit}%` })),
+    h("b", {}, dec(value)));
+}
+
+function answerCell(event) {
+  const tr = t();
+  const name = outcome(event);
+  const list = answers(event);
+  if (name === "failed") return h("span", { class: "sub" }, event.context?.reason ?? event.reason ?? "");
+  if (name === "skipped") return h("span", { class: "sub" }, tr.reasons[reasonKey(event.reason ?? "")] ?? event.reason ?? "");
+  if (!event.context && event.mode === "passthrough" && name === "answered" && event.jev) return h("span", {}, h("span", { class: "answer mono" }, event.jev.choice), h("div", { class: "sub" }, tr.llmDecided(event.jev.choice)));
+  const parts = list.map((a) => {
+    const text = answerText(a);
+    const prefix = list.length > 1 ? a.id + ": " : "";
+    return text ? h("div", {}, prefix, h("span", { class: "answer mono" }, text))
+      : h("div", { class: "sub" }, prefix + tr.noAnswer + (a.confidence !== undefined && threshold(event) !== undefined ? ` (${tr.belowLimit(dec(a.confidence), dec(threshold(event)))})` : ""));
+  });
+  return parts.length ? parts : "–";
+}
+
+function detail(event) {
+  const tr = t();
+  const context = event.context;
+  const name = outcome(event);
+  const rows = [
+    [tr.dPath, h("code", {}, event.path)],
+    [tr.dKind, `${tr.kinds[requestKind(event)]}${context?.kind ? " · " + context.kind : ""}`],
+    [tr.dClient, `${event.client} :${event.port}`],
+    event.model && [tr.dModel, event.model],
+    requestKind(event) === "tool" && [tr.dTools, String(event.tools)],
+    [tr.dResult, h("span", { class: `badge o-${name}` }, tr.outcome[name]), " — ", tr.outcomeLong[name]],
+    (context?.reason || event.reason) && [tr.dWhy, tr.reasons[reasonKey(context?.reason ?? event.reason)] ?? context?.reason ?? event.reason],
+    threshold(event) !== undefined && [tr.dThreshold, dec(threshold(event))],
+    context && [tr.dCalls, String(context.calls)],
+    jevTokens(event) !== undefined && [tr.dTokens, context ? `${int(jevTokens(event))} (${tr.tTokensSub(int(context.inputTokens), int(context.outputTokens))})` : int(jevTokens(event))],
+    jevLatency(event) !== undefined && [tr.dLatency, ms(jevLatency(event))],
+    event.durationMs !== undefined && [tr.dTotal, ms(event.durationMs)],
+    context && [tr.dDelivery, event.reason === "decision_only" ? tr.delivery.returned : event.path === "/router/decide" ? tr.delivery.simulated : context.applied ? tr.delivery.applied : tr.delivery.notApplied],
+  ].filter(Boolean);
+
+  const byId = Object.fromEntries(answers(event).map((a) => [a.id, a]));
+  const questions = context?.questions?.length ? context.questions
+    : event.jev ? [{ id: "tool", type: "choice", instructions: "", options: event.jev.shortlist ?? [] }] : [];
+  const PLACEHOLDER = /texto mantido fora do painel/i;
+  return h("div", {},
+    h("dl", { class: "kv" }, ...rows.flatMap(([label, ...value]) => [h("dt", {}, label), h("dd", {}, ...value)])),
+    questions.length && h("h3", {}, tr.dQuestions),
+    ...questions.map((q) => {
+      const a = byId[q.id];
+      const chosen = a && a.status === "ok" ? a.choice : undefined;
+      return h("div", { class: "q" },
+        h("div", {}, h("code", {}, q.id), h("span", { class: "sub" }, ` · ${q.type}`),
+          a && h("span", {}, " → ", h("b", {}, answerText(a) ?? tr.noAnswer), a.confidence !== undefined ? h("span", { class: "sub" }, ` · ${tr.dConf} ${dec(a.confidence)}`) : undefined)),
+        q.instructions && !PLACEHOLDER.test(q.instructions) && h("div", { class: "sub" }, q.instructions),
+        q.options.length ? h("div", { class: "opts", "aria-label": tr.dOptions }, ...q.options.map((option) => h("span", { class: option === chosen ? "chosen" : undefined }, option)))
+          : h("div", { class: "sub" }, tr.dNoOptions));
+    }),
+    h("h3", {}, tr.dText),
+    context?.inspection ? [h("pre", {}, JSON.stringify(context.inspection.received, null, 2)), h("h3", {}, tr.dJevReq), h("pre", {}, JSON.stringify(context.inspection.requests, null, 2))]
+      : h("p", { class: "note" }, tr.dNoText),
+    context && h("details", {}, h("summary", { class: "sub" }, tr.dRaw), h("pre", {}, JSON.stringify(context.workflow ?? context.assessments, null, 2))));
+}
+
+function renderFilters(events) {
+  const tr = t();
+  const counts = Object.fromEntries(OUTCOMES.map((name) => [name, 0]));
+  for (const event of events) counts[outcome(event)]++;
+  const chip = (name, label, count) => segButton(`${label} (${int(count)})`, view.outcome === name, name === "all" ? tr.all : tr.outcomeLong[name], () => { view.outcome = name; view.limit = PAGE_ROWS; });
+  $("filters").replaceChildren(chip("all", tr.all, events.length), ...OUTCOMES.filter((name) => counts[name] || name === "answered" || name === "abstain" || name === "failed").map((name) => chip(name, tr.outcome[name], counts[name])));
+}
+
+function renderRows(events, now) {
+  const tr = t();
+  $("rows-head").replaceChildren(...tr.cols.map((label, index) => h("th", { class: index >= 6 ? "num" : undefined }, label)));
+  const matching = events.filter((event) => view.outcome === "all" || outcome(event) === view.outcome).reverse();
+  const shown = matching.slice(0, view.limit);
+  const rest = matching.length - shown.length;
+  $("more").hidden = rest <= 0;
+  $("more").replaceChildren(h("span", {}, tr.showing(int(shown.length), int(matching.length))),
+    rest > 0 && segButton(tr.showMore(int(Math.min(PAGE_ROWS, rest))), false, tr.showMoreTitle, () => (view.limit += PAGE_ROWS)));
+  if (!shown.length) return $("rows").replaceChildren(h("tr", {}, h("td", { colspan: "8", class: "empty" }, events.length ? tr.noRowsFilter : tr.noRows)));
+  const today = new Date(now).toDateString();
+  $("rows").replaceChildren(...shown.flatMap((event) => {
+    const id = `${event.port}:${event.seq}:${event.time}`;
+    const open = view.open.has(id);
+    const name = outcome(event);
+    const ids = questionIds(event);
+    const row = h("tr", { class: `row${open ? " open" : ""}`, tabindex: "0", "aria-expanded": String(open) },
+      h("td", { class: "nowrap" }, clock(at(event), new Date(at(event)).toDateString() !== today)),
+      h("td", {}, tr.kinds[requestKind(event)], h("div", { class: "sub" }, requestKind(event) === "tool" ? event.model ?? event.path : event.context?.kind ?? event.path)),
+      h("td", {}, ids.length ? h("code", {}, ids.join(", ")) : "–"),
+      h("td", {}, h("span", { class: `badge o-${name}`, title: tr.outcomeLong[name] }, tr.outcome[name])),
+      h("td", {}, answerCell(event)),
+      h("td", {}, meter(event)),
+      h("td", { class: "num" }, jevLatency(event) !== undefined ? ms(jevLatency(event)) : "–"),
+      h("td", { class: "num" }, jevTokens(event) !== undefined ? int(jevTokens(event)) : "–"));
+    const toggle = () => { open ? view.open.delete(id) : view.open.add(id); rerender(); };
+    row.addEventListener("click", (e) => { if (!getSelection()?.toString()) toggle(); });
+    row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+    return open ? [row, h("tr", { class: "detail" }, h("td", { colspan: "8" }, detail(event)))] : [row];
+  }));
+}
+
+// ---- advanced -------------------------------------------------------------------------------
+
+function renderAdvanced(events) {
+  const tr = t();
+  const sum = (group, pick) => group.reduce((total, event) => total + (pick(event) ?? 0), 0);
+  const metered = events.filter((event) => event.usage);
+  const groups = [metered.filter((event) => !baseline(event)), metered.filter(baseline)];
+  const per = (group, pick) => (group.length ? sum(group, pick) / group.length : undefined);
+  const measures = [
+    [(group) => group.length, int],
+    [(group) => per(group, (event) => event.usage.input), int],
+    [(group) => (sum(group, (event) => event.usage.input) ? (100 * sum(group, (event) => event.usage.cached)) / sum(group, (event) => event.usage.input) : undefined), (value) => Math.round(value) + "%"],
+    [(group) => per(group, (event) => event.usage.output), int],
+    [(group) => per(group, (event) => event.usage.reasoning), int],
+    [(group) => per(group, (event) => event.durationMs / 1000), (value) => value.toLocaleString(view.lang, { maximumFractionDigits: 1 })],
+    [(group) => sum(group, (event) => event.usage.input), int],
+    [(group) => sum(group, (event) => event.usage.output), int],
+  ];
+  const cell = (value, format) => (value === undefined || Number.isNaN(value) ? "–" : format(value));
+  $("compare").replaceChildren(
+    h("thead", {}, h("tr", {}, h("th", {}, ""), ...tr.compareCols.map((label) => h("th", {}, label)))),
+    h("tbody", {}, ...measures.map(([measure, format], index) => {
+      const [withJev, without] = groups.map(measure);
+      const delta = index > 0 && index < 6 && withJev !== undefined && without ? (100 * (withJev - without)) / without : undefined;
+      return h("tr", {}, h("td", {}, tr.compareRows[index]), h("td", {}, cell(withJev, format)), h("td", {}, cell(without, format)),
+        h("td", {}, delta === undefined || !Number.isFinite(delta) ? "" : (delta > 0 ? "+" : "") + Math.round(delta) + "%"));
+    })));
+  $("compare-note").textContent = groups[1].length ? tr.compareNote : tr.compareEmpty;
+}
+
+// ---- main loop ------------------------------------------------------------------------------
+
+function render() {
+  const now = Date.now();
+  const up = sources.some((source) => source.up);
+  $("live").textContent = sources.some((source) => source.seen) ? (up ? t().live(clock(now)) : t().disconnected) : t().connecting;
+  const events = sources
+    .flatMap((source) => source.events)
+    .filter((event) => (view.client === "all" || event.client === view.client) && now - at(event) <= WINDOW_MS)
+    .sort((a, b) => at(a) - at(b));
+  // Rebuilding charts and rows under the pointer kills hover and text selection, so only do it
+  // when they would actually differ (new data, another filter, or the clock moving on).
+  const next = [view.client, view.outcome, view.limit, view.rows, view.lang, effectiveTheme(), events.length, events.at(-1)?.time, sources.map((source) => `${source.up}${source.router?.routing}`).join(), Math.floor(now / 30e3)].join("|");
+  if (next === signature) return;
+  signature = next;
+  renderControls();
+  renderStatus(now);
+  renderTiles(events, now);
+  renderHourly(events, now);
+  renderConfidence(events);
+  if (view.rows) {
+    renderFilters(events);
+    renderRows(events, now);
+  }
+  renderAdvanced(events);
+}
+
+async function tick() {
+  if (!document.hidden) {
+    await Promise.all(sources.map(poll));
+    render();
+  }
+  setTimeout(tick, POLL_MS);
+}
+applyTheme();
+$("rows-switch").addEventListener("click", () => {
+  view.rows = !view.rows;
+  store("master-jev-dashboard-rows", view.rows ? "on" : "off");
+  rerender();
+});
+matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", rerender);
+render();
+tick();
+</script>
+</body>
+</html>

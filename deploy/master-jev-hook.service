@@ -1,0 +1,22 @@
+# Modelo do serviço do gateway Master-JEV Hook (systemd --user).
+# Instalar: substituir @REPO@ (checkout absoluto) e @NODE@ (node >= 22.15 absoluto) e copiar
+# para ~/.config/systemd/user/. Ver o README, seção do serviço do gateway.
+[Unit]
+Description=Master-JEV Hook gateway
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=@REPO@/gateway
+ExecStart=@NODE@ --env-file=%h/.config/master-jev-hook/gateway.env @REPO@/gateway/dist/index.js
+StandardOutput=append:%h/.local/state/master-jev-hook/router.log
+StandardError=journal
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=default.target
