@@ -27,6 +27,19 @@ announces when JEV is queried and performs spot checks (risky Bash command,
 completion without verification, what to preserve during a compaction),
 always without blocking the session.
 
+The gateway uses TypeSafe's official SDK,
+[`@typesafe-ai/sdk`](https://www.npmjs.com/package/@typesafe-ai/sdk) **0.6.0**
+(a `devDependency`, `^0.6.0` in `gateway/package.json`, pinned by
+`pnpm-lock.yaml`), only for its TypeScript types: the shapes of the request
+and of the answers. The call itself is a direct HTTPS `POST` to JEV's
+SystemOne endpoint (`https://api.typesafe.ai/v1/systemone` by default;
+OpenRouter or Vercel AI Gateway through `JEV_PROVIDER`), with a timeout and
+retries only on 429/503/529. Those types define exactly three question modes:
+**Choice** (picks one option), **Score** (rates on an ordered scale) and
+**Noul** (probability of yes). The four batch tools `jev_classify` (Choice),
+`jev_verify` (Noul), `jev_score` (Score) and `jev_rank` (Score) are built on
+them.
+
 JEV decides between options the agent has already raised: it does not
 generate text, does not prove facts on its own, and does not grant
 permissions. Registering the MCP server also does not change the model's
@@ -65,6 +78,33 @@ the call into an HTTP request to the local gateway; the gateway builds the
 question for JEV (Choice, Score or Noul), queries the TypeSafe API and
 returns the result. The MCP adapter does not store the API key — it stays
 only in the gateway's environment.
+
+#### Round trip of a question
+
+```mermaid
+sequenceDiagram
+    participant C as Claude (harness)
+    participant H as claude_jev.py hooks
+    participant M as master-jev-mcp.mjs
+    participant G as Gateway 127.0.0.1:8795
+    participant J as JEV (api.typesafe.ai/v1/systemone)
+    C->>H: PreToolUse
+    H-->>C: 🔷 Consulting JEV now…
+    C->>M: MCP tool (request_decision / jev_*)
+    M->>G: POST /master/context or /master/decide
+    Note over G: validate (64 KB cap), mark state as untrusted,<br/>add "abstain" to Choice questions
+    G->>J: HTTPS POST: Choice / Score / Noul questions
+    J-->>G: answers with confidence or P(yes), token usage
+    Note over G: apply the risk threshold (0.65 / 0.80 / 0.90),<br/>log the call to /dashboard
+    G-->>M: accepted / abstain / fallback
+    M-->>C: tool result
+    C->>H: PostToolUse
+    H-->>C: 🔷 JEV chose … (confidence …)
+```
+
+The hooks' own checks (SessionStart self-test, Bash gate, Stop, PreCompact
+and drift) skip the MCP adapter: `claude_jev.py` posts straight to
+`/master/decide` and reads the same answers on the way back.
 
 #### MCP tools
 
@@ -548,6 +588,19 @@ JEV é consultado e faz verificações pontuais (comando arriscado no Bash,
 conclusão sem verificação, o que preservar numa compactação), sempre sem
 travar a sessão.
 
+O gateway usa o SDK oficial da TypeSafe,
+[`@typesafe-ai/sdk`](https://www.npmjs.com/package/@typesafe-ai/sdk) **0.6.0**
+(uma `devDependency`, `^0.6.0` em `gateway/package.json`, fixada pelo
+`pnpm-lock.yaml`), só pelos tipos TypeScript: o formato da requisição e das
+respostas. A chamada em si é um `POST` HTTPS direto ao endpoint SystemOne do
+JEV (`https://api.typesafe.ai/v1/systemone` por padrão; OpenRouter ou Vercel
+AI Gateway via `JEV_PROVIDER`), com timeout e novas tentativas só em
+429/503/529. Esses tipos definem exatamente três modos de pergunta: **Choice**
+(escolhe uma opção), **Score** (dá uma nota numa escala ordenada) e **Noul**
+(probabilidade de sim). As quatro ferramentas de lote `jev_classify`
+(Choice), `jev_verify` (Noul), `jev_score` (Score) e `jev_rank` (Score) são
+construídas sobre eles.
+
 O JEV decide entre opções que o agente já levantou: ele não gera texto, não
 prova fatos por conta própria e não concede permissões. Registrar o servidor
 MCP também não muda o endpoint de inferência do modelo — é uma ferramenta a
@@ -585,6 +638,33 @@ chamada em uma requisição HTTP ao gateway local; o gateway monta a pergunta
 para o JEV (Choice, Score ou Noul), consulta a API da TypeSafe e devolve o
 resultado. O adaptador MCP não guarda a chave da API — ela fica só no ambiente
 do gateway.
+
+#### Ida e volta de uma pergunta
+
+```mermaid
+sequenceDiagram
+    participant C as Claude (harness)
+    participant H as hooks do claude_jev.py
+    participant M as master-jev-mcp.mjs
+    participant G as Gateway 127.0.0.1:8795
+    participant J as JEV (api.typesafe.ai/v1/systemone)
+    C->>H: PreToolUse
+    H-->>C: 🔷 Consulting JEV now…
+    C->>M: ferramenta MCP (request_decision / jev_*)
+    M->>G: POST /master/context ou /master/decide
+    Note over G: valida (limite de 64 KB), marca o estado como não confiável,<br/>acrescenta "abstain" às perguntas Choice
+    G->>J: POST HTTPS: perguntas Choice / Score / Noul
+    J-->>G: respostas com confiança ou P(sim), uso de tokens
+    Note over G: aplica o limite do risco (0.65 / 0.80 / 0.90),<br/>registra a chamada no /dashboard
+    G-->>M: accepted / abstain / fallback
+    M-->>C: resultado da ferramenta
+    C->>H: PostToolUse
+    H-->>C: 🔷 JEV chose … (confidence …)
+```
+
+As verificações próprias dos hooks (autoteste do SessionStart, gate do Bash,
+Stop, PreCompact e desvio) não passam pelo adaptador MCP: o `claude_jev.py`
+faz o `POST` direto em `/master/decide` e lê as mesmas respostas na volta.
 
 #### Ferramentas MCP
 
