@@ -8,7 +8,7 @@ import { fakeJev, testConfig } from "./helpers.js";
 it("context endpoint creates questions and returns a decision without upstream", async () => {
   const f = fakeJev({ selection: { choice: "A" } });
   const app = createApp({ config: testConfig({ contextRouting: true }), askJev: f.askJev, fetch: async () => { throw new Error("must not call LLM"); } });
-  const res = await app.request("/master/context", { method: "POST", body: JSON.stringify({ objective: "Choose the primary source", context: { kind: "comparison", criterion: "Primary source", candidates: [{ id: "A", text: "Manufacturer's manual" }, { id: "B", text: "Comment without a source" }] } }) });
+  const res = await app.request("/master/context", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ objective: "Choose the primary source", context: { kind: "comparison", criterion: "Primary source", candidates: [{ id: "A", text: "Manufacturer's manual" }, { id: "B", text: "Comment without a source" }] } }) });
   expect(res.status).toBe(200); expect((await res.json() as any).assessments.selection.choice).toBe("A"); expect(f.requests).toHaveLength(1);
 });
 

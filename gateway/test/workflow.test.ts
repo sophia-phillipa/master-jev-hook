@@ -41,7 +41,7 @@ describe("risk-scaled thresholds", () => {
   it("maps risk to configured thresholds that never fall below the floor", async () => {
     const f = fake("yes", 0.85);
     const app = createApp({ config: testConfig(), askJev: f.ask });
-    const post = async (risk: string) => (await (await app.request("/master/decide", { method: "POST", body: JSON.stringify(single(risk)) })).json()) as any;
+    const post = async (risk: string) => (await (await app.request("/master/decide", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(single(risk)) })).json()) as any;
     expect(await post("medium")).toMatchObject({ status: "ok", threshold: 0.8 });
     expect(await post("high")).toMatchObject({ status: "abstain", threshold: 0.9 });
     const { loadConfig } = await import("../src/config.js");
@@ -106,7 +106,7 @@ describe("batches, chains, composite and cascade", () => {
 it("serves workflows directly and inline without forwarding internal fields", async () => {
   const f = fake(), up = fakeUpstream(), events = createEventLog();
   const app = createApp({ config: testConfig({ contextRouting: true }), askJev: f.ask, fetch: up.fetchImpl, events });
-  const direct = await app.request("/master/decide", { method: "POST", body: JSON.stringify(chain) });
+  const direct = await app.request("/master/decide", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(chain) });
   expect((await direct.json() as any).composite.value).toBe(0.7);
   expect(up.calls).toHaveLength(0);
   const inline = await app.request("/v1/responses", { method: "POST", body: JSON.stringify({ model: "test", input: "Compare", master_workflow: chain }) });

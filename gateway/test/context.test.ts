@@ -57,11 +57,11 @@ describe("context evaluation without tools", () => {
   it("applies the risk threshold to supplied decision contexts", async () => {
     const f = fakeJev({ selection: { choice: "A", confidence: 0.85 } });
     const app = createApp({ config: testConfig({ contextRouting: true }), askJev: f.askJev });
-    const post = async (risk?: string) => (await (await app.request("/master/context", { method: "POST", body: JSON.stringify({ objective: "Escolha",
+    const post = async (risk?: string) => (await (await app.request("/master/context", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ objective: "Escolha",
       context: { kind: "comparison", criterion: "c", candidates: [{ id: "A", text: "a" }, { id: "B", text: "b" }], ...(risk ? { risk } : {}) } }) })).json()) as any;
     expect(await post()).toMatchObject({ threshold: 0.65, assessments: { selection: { status: "accepted", choice: "A" } } });
     expect(await post("high")).toMatchObject({ threshold: 0.9, assessments: { selection: { status: "abstain" } } });
-    expect((await app.request("/master/context", { method: "POST", body: JSON.stringify({ objective: "x", context: { kind: "comparison", risk: "huge" } }) })).status).toBe(400);
+    expect((await app.request("/master/context", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ objective: "x", context: { kind: "comparison", risk: "huge" } }) })).status).toBe(400);
   });
 
   it("validates harness metadata without silently clipping evidence", () => {

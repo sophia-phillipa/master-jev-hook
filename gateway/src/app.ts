@@ -1,13 +1,14 @@
 import { timingSafeEqual } from "node:crypto";
 import { brotliDecompressSync, gunzipSync, inflateSync, zstdDecompressSync } from "node:zlib";
 import { Hono, type Context } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import type { Adapter } from "./adapters/adapter.js";
 import { chatAdapter } from "./adapters/chat.js";
 import { geminiAdapter } from "./adapters/gemini.js";
 import { messagesAdapter } from "./adapters/messages.js";
 import { responsesAdapter } from "./adapters/responses.js";
 import type { Config } from "./config.js";
-import { dashboardRoutes } from "./dashboard.js";
+import { dashboardRoutes, LOCAL_ORIGIN } from "./dashboard.js";
 import { redactHeaders, summarizeResponse, type Dump } from "./debug.js";
 import { decide, type AskJev, type Decision } from "./decide.js";
 import { createEventLog, type EventLog } from "./events.js";
@@ -35,7 +36,12 @@ const safeEqual = (a: string, b: string) => {
   return left.length === right.length && timingSafeEqual(left, right);
 };
 
-const DECODERS: Record<string, (data: Uint8Array) => Buffer> = {
+/** Largest provider request read into memory (Anthropic's own request limit is 32 MB). */
+const MAX_ROUTED_BODY_BYTES = 32 * 1024 * 1024;
+/** Largest /master/* request: decisions carry short texts, not conversations. */
+const MAX_MASTER_BODY_BYTES = 65536;
+
+const DECODERS: Record<string, (data: Uint8Array, options: { maxOutputLength: number }) => Buffer> = {
   zstd: zstdDecompressSync,
   gzip: gunzipSync,
   br: brotliDecompressSync,
@@ -47,7 +53,7 @@ function parseBody<Req>(bytes: Uint8Array, encoding: string | undefined): Req | 
   try {
     const decoder = encoding ? DECODERS[encoding.trim().toLowerCase()] : undefined;
     if (encoding && !decoder) return undefined;
-    const parsed: unknown = JSON.parse(Buffer.from(decoder ? decoder(bytes) : bytes).toString("utf8"));
+    const parsed: unknown = JSON.parse(Buffer.from(decoder ? decoder(bytes, { maxOutputLength: MAX_ROUTED_BODY_BYTES }) : bytes).toString("utf8"));
     return parsed && typeof parsed === "object" ? (parsed as Req) : undefined;
   } catch {
     return undefined;
@@ -56,7 +62,8 @@ function parseBody<Req>(bytes: Uint8Array, encoding: string | undefined): Req | 
 
 function decisionHeaders(decision: Decision): Record<string, string> {
   const headers: Record<string, string> = { "x-jev-gateway-mode": decision.mode };
-  if (decision.mode === "passthrough") headers["x-jev-gateway-reason"] = decision.reason.slice(0, 120);
+  // Header values must be Latin-1; an error message can be anything, and must not turn into a 500.
+  if (decision.mode === "passthrough") headers["x-jev-gateway-reason"] = decision.reason.replace(/[^\x20-\x7e]/g, "?").slice(0, 120);
   if (decision.mode === "forced" || decision.mode === "direct" || decision.mode === "hint") {
     headers["x-jev-gateway-tool"] = decision.tool;
   }
@@ -250,6 +257,29 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
     return response;
   };
 
+  /**
+   * Any web page can send simple requests to loopback, and a DNS-rebinding page can do it under its
+   * own host name. Without a key, only this machine's own host names are served; and no page from
+   * another site may call the routes that spend the JEV or provider key. Requiring JSON on the
+   * decision routes forces a CORS preflight, which the gateway never grants.
+   */
+  app.use("*", async (c, next) => {
+    const forbidden = (message: string, status: 403 | 415 = 403) => c.json({ error: { message, type: status === 403 ? "forbidden" : "invalid_request_error" } }, status);
+    const host = (c.req.header("host") ?? new URL(c.req.url).host).toLowerCase();
+    if (!config.routerApiKey && !LOCAL_ORIGIN.test(`http://${host}`)) return forbidden("Host not allowed");
+    if (!/^\/(master|router|v1|v1beta)\//.test(c.req.path)) return next();
+    const origin = c.req.header("origin");
+    if (origin !== undefined && !LOCAL_ORIGIN.test(origin)) return forbidden("Origin not allowed");
+    const json = c.req.header("content-type")?.split(";")[0]?.trim().toLowerCase() === "application/json";
+    if ((c.req.path.startsWith("/master/") || c.req.path === "/router/decide") && !json) return forbidden("Content-Type must be application/json", 415);
+    return next();
+  });
+
+  const routedLimit = bodyLimit({ maxSize: MAX_ROUTED_BODY_BYTES,
+    onError: (c) => c.json({ error: { message: "Request body too large", type: "invalid_request_error" } }, 413) });
+  const masterLimit = bodyLimit({ maxSize: MAX_MASTER_BODY_BYTES,
+    onError: (c) => c.json({ status: "fallback", reason: "request_too_large" }, 413) });
+
   // Answers before the key is checked, so that a launcher can find its gateway. A gateway that
   // has a key is one somebody else may reach: it says that it is up, and nothing about itself.
   app.get("/health", (c) =>
@@ -270,7 +300,7 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
    * Dry run: what would the router do with this body? Calls Jev, never upstream.
    * Accepts any routed wire format; `?format=chat|responses|messages` overrides the guess.
    */
-  app.post("/router/decide", async (c) => {
+  app.post("/router/decide", routedLimit, async (c) => {
     const req = parseBody<Record<string, unknown>>(new Uint8Array(await c.req.arrayBuffer()), undefined);
     if (!req) return c.json({ error: { message: "Body must be a JSON object", type: "invalid_request_error" } }, 400);
     const adapters = { chat: chatAdapter, responses: responsesAdapter, messages: messagesAdapter, gemini: geminiAdapter };
@@ -292,10 +322,9 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
     return c.json({ ...result.decision, ...(result.context ? { context } : {}) });
   });
 
-  app.post("/master/context", async (c) => {
+  app.post("/master/context", masterLimit, async (c) => {
     if (!routing || c.req.header("x-jev-gateway") === "off") return c.json({ status: "skipped", reason: "routing_disabled" });
     const bytes = new Uint8Array(await c.req.arrayBuffer());
-    if (bytes.length > 65536) return c.json({ status: "fallback", reason: "request_too_large" }, 413);
     try {
       const body = parseBody<Record<string, unknown>>(bytes, undefined);
       if (!body || Object.keys(body).some((k) => !["objective", "context"].includes(k)) || typeof body.objective !== "string" || !body.objective.trim() || body.objective.length > 8000) throw new Error("invalid_objective");
@@ -313,10 +342,9 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
   });
 
   // Explicit batches/chains from the harness, independent of any model-provider protocol.
-  app.post("/master/decide", async (c) => {
+  app.post("/master/decide", masterLimit, async (c) => {
     if (!routing || c.req.header("x-jev-gateway") === "off") return c.json({ status: "skipped", reason: "routing_disabled" });
     const bytes = new Uint8Array(await c.req.arrayBuffer());
-    if (bytes.length > 65536) return c.json({ status: "fallback", reason: "request_too_large" }, 413);
     try {
       const report = await assessWorkflow(parseBody(bytes, undefined), config, askJev);
       log({ event: "route", time: new Date().toISOString(), path: "/master/decide", tools: 0, mode: "passthrough", reason: "decision_only", context: report });
@@ -331,10 +359,10 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
     dashboardRoutes(config, events, { get: () => routing, set: (enabled) => void (routing = enabled) }),
   );
 
-  app.post("/v1/chat/completions", route(chatAdapter));
-  app.post("/v1/responses", route(responsesAdapter));
-  app.post("/v1/messages", route(messagesAdapter));
-  app.post("/v1beta/models/*", route(geminiAdapter));
+  app.post("/v1/chat/completions", routedLimit, route(chatAdapter));
+  app.post("/v1/responses", routedLimit, route(responsesAdapter));
+  app.post("/v1/messages", routedLimit, route(messagesAdapter));
+  app.post("/v1beta/models/*", routedLimit, route(geminiAdapter));
 
   // Everything else (models, embeddings, …) is proxied untouched.
   app.all("/v1/*", async (c) => {

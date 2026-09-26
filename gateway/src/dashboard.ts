@@ -12,7 +12,7 @@ const page = readFileSync(new URL("./dashboard.html", import.meta.url), "utf8");
  * served by one router polls the others. Only a page that itself came from this machine may read
  * across ports — any other origin gets no CORS header, so the browser withholds the response.
  */
-const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+export const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 
 export interface RoutingSwitch {
   get(): boolean;

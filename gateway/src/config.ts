@@ -80,7 +80,7 @@ export function loadConfig(env: Env = process.env): Config {
   }
   const config: Config = {
     host: str(env, "HOST") ?? "127.0.0.1",
-    port: num(env, "PORT", 8787),
+    port: num(env, "PORT", 8795),
     upstreamBaseUrl: (str(env, "UPSTREAM_BASE_URL") ?? "https://api.openai.com/v1").replace(/\/+$/, ""),
     upstreamApiKey: str(env, "UPSTREAM_API_KEY"),
     routerApiKey: str(env, "ROUTER_API_KEY"),
@@ -106,6 +106,10 @@ export function loadConfig(env: Env = process.env): Config {
     client: str(env, "JEV_CLIENT") ?? "standalone",
     logFile: str(env, "JEV_LOG_FILE"),
   };
+  // Without a key, anyone who can reach the port spends the JEV and provider keys.
+  if (!config.routerApiKey && !/^(localhost|127\.0\.0\.1|::1|\[::1\])$/i.test(config.host)) {
+    throw new Error(`HOST=${config.host} is not a loopback address: set ROUTER_API_KEY (and UPSTREAM_API_KEY) before exposing the gateway`);
+  }
   if (config.routerApiKey && !config.upstreamApiKey) {
     throw new Error("ROUTER_API_KEY requires UPSTREAM_API_KEY (the client key is not valid upstream)");
   }

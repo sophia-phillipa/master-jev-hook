@@ -1,7 +1,7 @@
 // Shared by the jev-<client> launchers: keep one background router per client alive, then run
 // the client pointed at it. Nothing in the client's own config directory is ever modified.
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, fchmodSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,6 +42,14 @@ export async function runLauncher(spec) {
   const port = Number(process.env[spec.portEnv] ?? spec.defaultPort);
   const origin = `http://127.0.0.1:${port}`;
   const logFile = join(STATE_DIR, `${spec.client}.log`);
+  // Creation modes do not apply to an existing directory or log, so tighten both every time.
+  const openLog = () => {
+    mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
+    chmodSync(STATE_DIR, 0o700);
+    const fd = openSync(logFile, "a", 0o600);
+    fchmodSync(fd, 0o600);
+    return fd;
+  };
   const pidFile = join(STATE_DIR, `${spec.client}.pid`);
 
   const help = `${spec.name}: ${spec.client} with tool selection routed through Jev
@@ -113,8 +121,7 @@ Environment (or ${ENV_FILES.at(-1)}):
     }
     await ensureKey();
 
-    mkdirSync(STATE_DIR, { recursive: true });
-    const log = openSync(logFile, "a");
+    const log = openLog();
     // The client authenticates itself (subscription login or its own key); the gateway must not swap that out.
     const { UPSTREAM_API_KEY: _key, ROUTER_API_KEY: _routerKey, ...env } = process.env;
     const child = spawn(process.execPath, ROUTER_ARGS, {
@@ -138,16 +145,11 @@ Environment (or ${ENV_FILES.at(-1)}):
     process.exit(1);
   };
 
-  // Pid files written before the project was renamed; a router started back then is still running.
-  const legacyPidFile = join(homedir(), ".jev-router", `${spec.client}.pid`);
-
   const stopRouter = async () => {
     // Whoever answers on the port is the router to stop; pid files only cover ones that don't say.
     const candidates = [(await health())?.pid];
-    for (const file of [pidFile, legacyPidFile]) {
-      if (existsSync(file)) candidates.push(Number(readFileSync(file, "utf8")));
-      rmSync(file, { force: true });
-    }
+    if (existsSync(pidFile)) candidates.push(Number(readFileSync(pidFile, "utf8")));
+    rmSync(pidFile, { force: true });
     const pids = [...new Set(candidates.filter((pid) => Number.isInteger(pid) && pid > 0))];
     let stopped = false;
     for (const pid of pids) {
@@ -242,8 +244,7 @@ Environment (or ${ENV_FILES.at(-1)}):
     return;
   }
   if (flag === "--logs") {
-    mkdirSync(STATE_DIR, { recursive: true });
-    closeSync(openSync(logFile, "a"));
+    closeSync(openLog());
     return spawn("tail", ["-n", "30", "-f", logFile], { stdio: "inherit" });
   }
 

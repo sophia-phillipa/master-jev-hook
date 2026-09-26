@@ -411,7 +411,7 @@ const params = new URLSearchParams(location.search);
 const key = params.get("key");
 const ownPort = location.port || (location.protocol === "https:" ? "443" : "80");
 // `?peers=8795,8796` adds other local routers to the same page.
-const ports = new Set([ownPort, ...(params.get("peers") ?? "").split(",").filter(Boolean)]);
+const ports = new Set([ownPort, ...(params.get("peers") ?? "").split(",").filter((port) => /^\d{1,5}$/.test(port))]);
 const sources = [...ports].map((port) => ({
   port,
   own: port === ownPort,

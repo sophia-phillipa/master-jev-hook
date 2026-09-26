@@ -193,7 +193,7 @@ describe("gateway", () => {
 
   it("reports the decision without calling upstream on /router/decide", async () => {
     const { app, upstream } = setup(lightsAnswers);
-    const res = await app.request("/router/decide", { method: "POST", body: JSON.stringify(chat("kitchen lights on")) });
+    const res = await app.request("/router/decide", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(chat("kitchen lights on")) });
     expect(await res.json()).toMatchObject({ mode: "direct", tool: "set_lights", jev: { choice: "set_lights" } });
     expect(upstream.calls).toHaveLength(0);
   });
@@ -202,7 +202,7 @@ describe("gateway", () => {
 it("dry-run tolerates malformed tools without an unhandled server error", async () => {
   const app = createApp({ config: testConfig(), askJev: fakeJev({}).askJev });
   for (const tool of [null, 1, "invalid"]) {
-    const res = await app.request("/router/decide", { method: "POST", body: JSON.stringify({ messages: [], tools: [tool] }) });
+    const res = await app.request("/router/decide", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messages: [], tools: [tool] }) });
     expect(res.status).toBe(200);
     expect((await res.json() as any).mode).toBe("passthrough");
   }

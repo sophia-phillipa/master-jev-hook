@@ -33,7 +33,7 @@ describe('private input inspection', () => {
     const context = { kind: 'comparison', candidates: [{ id: 'a', text: 'offline' }, { id: 'b', text: 'online' }] };
     const body = path === '/master/context' ? { objective, context }
       : { model: 'test', messages: [{ role: 'user', content: objective }], master_context: context };
-    const response = await app.request(path, { method: 'POST', body: JSON.stringify(body) });
+    const response = await app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     expect(response.status).toBe(200);
     const result = await response.json();
     expect(path === '/master/context' ? result : result.context).toMatchObject({ assessments: { selection: { choice: 'a' } } });

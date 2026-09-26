@@ -17,6 +17,13 @@ StandardError=journal
 Restart=on-failure
 RestartSec=5
 UMask=0077
+# Sandbox: the gateway only reads its checkout and env file; the one place it may write is the
+# state folder (JEV_LOG_FILE lives there, and so must JEV_DEBUG_DUMP_DIR if you enable it).
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=%h/.local/state/master-jev-hook
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 
 [Install]
 WantedBy=default.target
