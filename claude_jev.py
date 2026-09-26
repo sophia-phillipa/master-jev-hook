@@ -36,15 +36,15 @@ EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 # checks the answer, so "gateway active" is only reported after the JEV really answered correctly.
 PROBE_CLAIM = "Water boils at 100 °C at sea level."
 PROBE_QUESTION = "Is the statement in `claim` true?"
-PROBE = (  # (question id, label, what the modality returns, options asked, question, expected answer)
-    ("choice", "Choice", "picks one option", "true | false",
+PROBE = (  # (question id, label, what the modality returns, question, expected answer)
+    ("choice", "Choice", "picks one option",
      {"type": "choice", "instructions": PROBE_QUESTION,
       "criteria": {"true": "The statement is true.", "false": "The statement is false."}},
      lambda a: a.get("choice") == "true"),
-    ("score", "Score", "rates on a scale", "0 false · 1 partly true · 2 true",
+    ("score", "Score", "rates on a scale",
      {"type": "score", "instructions": PROBE_QUESTION + " Rate how true it is.", "criteria": ["false", "partly true", "true"]},
      lambda a: isinstance(a.get("score"), (int, float)) and a["score"] >= 1.5),
-    ("noul", "Noul", "probability of yes", "yes or no",
+    ("noul", "Noul", "probability of yes",
      {"type": "noul", "instructions": PROBE_QUESTION}, lambda a: isinstance(a.get("noul"), (int, float)) and a["noul"] >= 0.5),
 )
 # The desktop app does not show a SessionStart systemMessage, and Claude tends to paraphrase context.
@@ -403,31 +403,25 @@ def drift(event):
 def self_test():
     """Live, paid JEV check at session start. Returns a user-facing message; claims only what the answers show."""
     data = gateway({"risk": "low", "state": {"claim": PROBE_CLAIM},
-                    "questions": {qid: question for qid, _, _, _, question, _ in PROBE}}, timeout=3)
+                    "questions": {qid: question for qid, _, _, question, _ in PROBE}}, timeout=3)
     if not data:
         url = load(HERE / "claude_jev.json", {}).get("gateway_url") or "http://127.0.0.1:8795"
         return f"❌ Master-JEV Hook gateway unreachable at {text(url, 80)}; JEV decisions fall back to local alternatives."
+    # Only the verdict per modality is shown; the question and the answers stay out of the message.
     lines, passed = [], 0
-    for qid, label, returns, options, _, expected in PROBE:
+    for qid, label, returns, _, expected in PROBE:
         a = answer(data, qid)
-        asked = f"{label} ({returns}) · asked: {options}"
         if not a:
-            lines.append(f"❌ {asked} → {no_decision(data, qid)}")
+            lines.append(f"* {label}: {returns} ❌ ({no_decision(data, qid)})")
             continue
-        if a.get("choice") is not None:
-            value = f"`{a['choice']}`, confidence {pct(a['confidence'])}"
-        elif a.get("score") is not None:
-            value = f"{pct(a['score'])}, confidence {pct(a['confidence'])}"
-        else:
-            value = f"P(yes) {pct(a.get('noul', 0))}"
         ok = expected(a)
         passed += ok
-        lines.append(f"{'✅' if ok else '⚠️'} {asked} → answered {value}")
+        lines.append(f"* {label}: {returns} {'✅' if ok else '⚠️'}")
     cost = (f"{data['calls']} paid call, {data.get('latencyMs', '?')} ms, {data.get('inputTokens', 0) + data.get('outputTokens', 0)} tokens"
             if data.get("calls") else f"no JEV call made: {text(data.get('reason') or data.get('status') or 'unknown', 40)}")
-    head = (f"🔷 Master-JEV Hook gateway active: live JEV test passed ({cost})." if passed == len(PROBE) else
-            f"⚠️ Master-JEV Hook gateway reachable, but the live JEV test passed {passed}/{len(PROBE)} ({cost}).")
-    return "\n".join([head, f"❓ Same question in each modality: is \"{PROBE_CLAIM}\" true?", *("  " + l for l in lines)])
+    head = (f"🔷 Master-JEV Hook gateway active: live JEV test passed ({cost}):" if passed == len(PROBE) else
+            f"⚠️ Master-JEV Hook gateway reachable, but the live JEV test passed {passed}/{len(PROBE)} ({cost}):")
+    return "\n".join([head, "", *lines])
 
 
 DECISION_HOOKS = {"bash-gate": ("PreToolUse", bash_gate), "stop-check": ("Stop", stop_check),

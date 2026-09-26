@@ -246,8 +246,8 @@ class DecisionHookTests(unittest.TestCase):
         self.assertEqual(body["risk"], "low")
         self.assertEqual({q["type"] for q in body["questions"].values()}, {"choice", "score", "noul"})
         message = out["systemMessage"]
-        self.assertTrue(message.startswith("🔷 Master-JEV Hook gateway active: live JEV test passed (1 paid call, 280 ms, 540 tokens)."))
-        self.assertEqual(message.count("✅"), 3)
+        self.assertEqual(message, "🔷 Master-JEV Hook gateway active: live JEV test passed (1 paid call, 280 ms, 540 tokens):\n\n"
+                                  "* Choice: picks one option ✅\n* Score: rates on a scale ✅\n* Noul: probability of yes ✅")
         context = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("print the block below verbatim", context)
         self.assertTrue(context.endswith(message))
@@ -259,8 +259,11 @@ class DecisionHookTests(unittest.TestCase):
         message = self.run_hook("hook", {"hook_event_name": "SessionStart", "source": "startup"})["systemMessage"]
         self.assertTrue(message.startswith("⚠️ Master-JEV Hook gateway reachable, but the live JEV test passed 1/3"))
         self.assertNotIn("gateway active", message)
-        self.assertIn("⚠️ Choice (picks one option) · asked: true | false → answered `false`, confidence 0.96", message)
-        self.assertIn("❌ Noul (probability of yes) · asked: yes or no → no decision (abstain)", message)
+        self.assertIn("* Choice: picks one option ⚠️", message)
+        self.assertIn("* Score: rates on a scale ✅", message)
+        self.assertIn("* Noul: probability of yes ❌ (no decision (abstain))", message)
+        self.assertNotIn("Water boils", message)  # the question and the answers are not shown
+        self.assertNotIn("0.96", message)
 
     def test_session_start_reports_skipped_and_unreachable_gateway(self):
         self.gateway.replies.append((200, {"status": "skipped", "reason": "routing_disabled"}))
