@@ -66,12 +66,20 @@ class ClaudeIntegrationTests(unittest.TestCase):
                 self.assertEqual(mcp["env"]["MASTER_JEV_GATEWAY_KEY"], "private")
                 self.assertEqual(mcp["env"]["EXTRA"], "kept")
             self.assertIn("request_decision", before[home / "CLAUDE.md"].decode())
+            config = (prefix / "claude_jev.json").read_text()
+            # Unreachable gateway: the session-start self-test must not make a real, paid call here.
+            (prefix / "claude_jev.json").write_text(json.dumps({"gateway_url": "http://127.0.0.1:9", "guide_in_memory": True}))
             for source in ("startup", "resume", "clear", "compact", "fork"):
-                # Guide already in CLAUDE.md: SessionStart does not repeat it (token savings).
+                # Guide already in CLAUDE.md: SessionStart does not repeat it (token savings), only the gateway status.
                 result = subprocess.run([sys.executable, str(prefix / "claude_jev.py"), "hook"],
                     input=json.dumps({"hook_event_name": "SessionStart", "source": source}),
-                    text=True, capture_output=True, check=True, timeout=3)
-                self.assertEqual(result.stdout, "")
+                    text=True, capture_output=True, check=True, timeout=5)
+                out = json.loads(result.stdout)
+                self.assertTrue(out["systemMessage"].startswith("❌ Master-JEV Hook gateway unreachable"))
+                context = out["hookSpecificOutput"]["additionalContext"]
+                self.assertTrue(context.startswith("Master-JEV Hook session check"))
+                self.assertTrue(context.endswith(out["systemMessage"]))
+            (prefix / "claude_jev.json").write_text(config)
             hooks = json.loads(before[home / "settings.json"])["hooks"]
             for event, count in (("UserPromptSubmit", 1), ("PreToolUse", 2), ("PostToolUse", 2),
                                  ("Stop", 1), ("PreCompact", 1)):

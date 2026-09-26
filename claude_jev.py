@@ -32,6 +32,25 @@ RISKY_BASH = re.compile(r"""(\brm\s+(-[A-Za-z]*[rRf]|--(recursive|force))|\bsudo
 SELF_DISABLE = re.compile(r"^(?>[^\n]*?\bsystemctl\b)(?>[^\n]*?\b(stop|disable|mask|kill)\b)[^\n]*\bmaster-jev-hook\b", re.I | re.M)
 TEST_COMMAND = re.compile(r"\b(pytest|unittest|vitest|jest|mocha|go\s+test|cargo\s+test|(npm|pnpm|yarn|bun)\s+(run\s+)?test|make\s+(test|check)|tox|ruff|mypy|tsc|typecheck)\b")
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+# Session-start self-test: one paid gateway call asks the same question in each JEV modality and
+# checks the answer, so "gateway active" is only reported after the JEV really answered correctly.
+PROBE_CLAIM = "Water boils at 100 °C at sea level."
+PROBE_QUESTION = "Is the statement in `claim` true?"
+PROBE = (  # (question id, label, what the modality returns, options asked, question, expected answer)
+    ("choice", "Choice", "picks one option", "true | false",
+     {"type": "choice", "instructions": PROBE_QUESTION,
+      "criteria": {"true": "The statement is true.", "false": "The statement is false."}},
+     lambda a: a.get("choice") == "true"),
+    ("score", "Score", "rates on a scale", "0 false · 1 partly true · 2 true",
+     {"type": "score", "instructions": PROBE_QUESTION + " Rate how true it is.", "criteria": ["false", "partly true", "true"]},
+     lambda a: isinstance(a.get("score"), (int, float)) and a["score"] >= 1.5),
+    ("noul", "Noul", "probability of yes", "yes or no",
+     {"type": "noul", "instructions": PROBE_QUESTION}, lambda a: isinstance(a.get("noul"), (int, float)) and a["noul"] >= 0.5),
+)
+# The desktop app does not show a SessionStart systemMessage, and Claude tends to paraphrase context.
+PRINT_STATUS = ("Master-JEV Hook session check (real result of a paid JEV call made by the SessionStart hook). "
+                "In your next reply, before anything else, print the block below verbatim inside a ```text code block, "
+                "without summarizing or translating it; then answer normally.")
 STOP_LIMIT = 3  # feedbacks per session
 DRIFT_EVERY = 15  # tool calls between checks
 KEEP_NOUL = 0.7  # minimum probability to keep an item during compaction
@@ -381,6 +400,36 @@ def drift(event):
         note + " Reassess the plan: stop repeating what isn't making progress, go back to the request, or ask the user.")}}
 
 
+def self_test():
+    """Live, paid JEV check at session start. Returns a user-facing message; claims only what the answers show."""
+    data = gateway({"risk": "low", "state": {"claim": PROBE_CLAIM},
+                    "questions": {qid: question for qid, _, _, _, question, _ in PROBE}}, timeout=3)
+    if not data:
+        url = load(HERE / "claude_jev.json", {}).get("gateway_url") or "http://127.0.0.1:8795"
+        return f"❌ Master-JEV Hook gateway unreachable at {text(url, 80)}; JEV decisions fall back to local alternatives."
+    lines, passed = [], 0
+    for qid, label, returns, options, _, expected in PROBE:
+        a = answer(data, qid)
+        asked = f"{label} ({returns}) · asked: {options}"
+        if not a:
+            lines.append(f"❌ {asked} → {no_decision(data, qid)}")
+            continue
+        if a.get("choice") is not None:
+            value = f"`{a['choice']}`, confidence {pct(a['confidence'])}"
+        elif a.get("score") is not None:
+            value = f"{pct(a['score'])}, confidence {pct(a['confidence'])}"
+        else:
+            value = f"P(yes) {pct(a.get('noul', 0))}"
+        ok = expected(a)
+        passed += ok
+        lines.append(f"{'✅' if ok else '⚠️'} {asked} → answered {value}")
+    cost = (f"{data['calls']} paid call, {data.get('latencyMs', '?')} ms, {data.get('inputTokens', 0) + data.get('outputTokens', 0)} tokens"
+            if data.get("calls") else f"no JEV call made: {text(data.get('reason') or data.get('status') or 'unknown', 40)}")
+    head = (f"🔷 Master-JEV Hook gateway active: live JEV test passed ({cost})." if passed == len(PROBE) else
+            f"⚠️ Master-JEV Hook gateway reachable, but the live JEV test passed {passed}/{len(PROBE)} ({cost}).")
+    return "\n".join([head, f"❓ Same question in each modality: is \"{PROBE_CLAIM}\" true?", *("  " + l for l in lines)])
+
+
 DECISION_HOOKS = {"bash-gate": ("PreToolUse", bash_gate), "stop-check": ("Stop", stop_check),
                   "precompact": ("PreCompact", precompact), "drift": ("PostToolUse", drift)}
 
@@ -392,8 +441,9 @@ def emit(event, stdin):
     if event.get("hook_event_name") == "SessionStart" and stdin == "hook":
         # Token savings: if the guide is already in CLAUDE.md, do not repeat it; only what compaction preserved.
         guide = "" if load(HERE / "claude_jev.json", {}).get("guide_in_memory") else (HERE / "master-jev-hook-claude.md").read_text(encoding="utf-8")
-        context = (guide + preserved(event)).strip()
-        return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}} if context else None
+        status = self_test()
+        context = (guide + preserved(event) + "\n\n" + PRINT_STATUS + "\n\n" + status).strip()
+        return {"systemMessage": status, "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}}
     if event.get("hook_event_name") == "UserPromptSubmit" and stdin == "prompt":
         return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": REMINDER}}
     if not str(event.get("tool_name", "")).startswith(MCP_PREFIX):

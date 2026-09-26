@@ -231,6 +231,46 @@ class DecisionHookTests(unittest.TestCase):
         self.assertNotIn("hookSpecificOutput", out)
         self.assertIn("🔷", out["systemMessage"])
 
+    # --- Session-start self-test -----------------------------------------------------------------
+    def probe_reply(self, choice="true", score=1.9, noul=0.95):
+        return {"status": "ok", "calls": 1, "latencyMs": 280, "inputTokens": 470, "outputTokens": 70, "answers": {
+            "choice": {"type": "choice", "status": "ok", "choice": choice, "confidence": 0.96},
+            "score": {"type": "score", "status": "ok", "score": score, "confidence": 0.82},
+            "noul": {"type": "noul", "status": "ok", "noul": noul}}}
+
+    def test_session_start_reports_active_only_after_correct_answers(self):
+        self.gateway.replies.append((200, self.probe_reply()))
+        out = self.run_hook("hook", {"hook_event_name": "SessionStart", "source": "startup", "session_id": "p1"})
+        path, body = self.gateway.requests[0]
+        self.assertEqual(path, "/master/decide")
+        self.assertEqual(body["risk"], "low")
+        self.assertEqual({q["type"] for q in body["questions"].values()}, {"choice", "score", "noul"})
+        message = out["systemMessage"]
+        self.assertTrue(message.startswith("🔷 Master-JEV Hook gateway active: live JEV test passed (1 paid call, 280 ms, 540 tokens)."))
+        self.assertEqual(message.count("✅"), 3)
+        context = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("print the block below verbatim", context)
+        self.assertTrue(context.endswith(message))
+
+    def test_session_start_flags_wrong_or_missing_answers(self):
+        reply = self.probe_reply(choice="false")
+        reply["answers"]["noul"] = {"type": "noul", "status": "abstain"}
+        self.gateway.replies.append((200, reply))
+        message = self.run_hook("hook", {"hook_event_name": "SessionStart", "source": "startup"})["systemMessage"]
+        self.assertTrue(message.startswith("⚠️ Master-JEV Hook gateway reachable, but the live JEV test passed 1/3"))
+        self.assertNotIn("gateway active", message)
+        self.assertIn("⚠️ Choice (picks one option) · asked: true | false → answered `false`, confidence 0.96", message)
+        self.assertIn("❌ Noul (probability of yes) · asked: yes or no → no decision (abstain)", message)
+
+    def test_session_start_reports_skipped_and_unreachable_gateway(self):
+        self.gateway.replies.append((200, {"status": "skipped", "reason": "routing_disabled"}))
+        message = self.run_hook("hook", {"hook_event_name": "SessionStart", "source": "startup"})["systemMessage"]
+        self.assertIn("passed 0/3 (no JEV call made: routing_disabled)", message)
+        self.configure("http://127.0.0.1:9")
+        message = self.run_hook("hook", {"hook_event_name": "SessionStart", "source": "startup"})["systemMessage"]
+        self.assertEqual(message, "❌ Master-JEV Hook gateway unreachable at http://127.0.0.1:9; "
+                                  "JEV decisions fall back to local alternatives.")
+
     # --- Compaction ----------------------------------------------------------------------------
     def test_precompact_selects_items_and_session_start_reinjects_them(self):
         prompts = ["Talk to me in English", "ok", "Don't push without asking me", "read the README"]
