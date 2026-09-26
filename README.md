@@ -469,6 +469,55 @@ for LLM client tool routing), `MOCK_JEV_CONFIDENCE` (confidence of the tool
 choice, default `0.95`) and `MOCK_JEV_DUMP_DIR` (writes each question and
 answer to disk, for debugging).
 
+### Branching and releases
+
+The project follows **GitHub Flow** with **Semantic Versioning**:
+
+- **`main` is the only long-lived branch.** It is always releasable.
+- **Every change goes on a short-lived branch** named `<type>/<scope>-<slug>` (`feat/`, `fix/`, `docs/`, `refactor/`, `test/`, `build/`, `ci/`, `chore/`).
+- **Before merging,** a change passes the checks in [Development](#development): Python tests, and the gateway typecheck, tests, build and install smoke. It is then merged into `main` with `--no-ff`. Outside contributors open a pull request against `main`.
+- **Commits** follow [Conventional Commits](https://www.conventionalcommits.org/), in English. When the README changes, both language halves change in the same commit.
+- **A release** starts on a `chore/release-vX.Y.Z` branch with a `chore(release): vX.Y.Z` commit that bumps the versions. That branch is merged, and the annotated tag `vX.Y.Z` is created on `main`.
+- **A hotfix** is a `fix/` branch from `main`, followed by a patch release.
+
+```mermaid
+gitGraph
+  commit id: "release v1.0.0" tag: "v1.0.0"
+  branch feat/gate-context
+  checkout feat/gate-context
+  commit id: "feat(hooks): ..."
+  commit id: "test(hooks): ..."
+  checkout main
+  merge feat/gate-context id: "merge --no-ff (feat)"
+  branch docs/readme
+  checkout docs/readme
+  commit id: "docs: ..."
+  checkout main
+  merge docs/readme id: "merge --no-ff (docs)"
+  branch chore/release-v1.1.0
+  checkout chore/release-v1.1.0
+  commit id: "chore(release): v1.1.0"
+  checkout main
+  merge chore/release-v1.1.0 id: "release v1.1.0" tag: "v1.1.0"
+  branch fix/redaction
+  checkout fix/redaction
+  commit id: "fix(hooks): ..."
+  checkout main
+  merge fix/redaction id: "merge --no-ff (hotfix)" tag: "v1.1.1"
+```
+
+| Change since the last tag | Next version |
+|---|---|
+| `BREAKING CHANGE:` or `!` after the type | MAJOR (`2.0.0`) |
+| `feat` | MINOR (`1.1.0`) |
+| `fix`, `perf` | PATCH (`1.0.1`) |
+| only `docs`, `test`, `ci`, `chore`, `style`, `refactor`, `build` | no release |
+
+The public API that SemVer protects covers three things:
+- the MCP tool names and parameters;
+- the gateway HTTP endpoints and environment variables;
+- the hook behavior described in this README.
+
 ### License
 
 Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
@@ -937,6 +986,55 @@ Outras variáveis do mock: `MOCK_JEV_SCRIPT` (nomes de ferramenta a devolver em
 sequência, para roteamento de ferramentas de clientes LLM), `MOCK_JEV_CONFIDENCE`
 (confiança da escolha de ferramenta, padrão `0.95`) e `MOCK_JEV_DUMP_DIR`
 (grava cada pergunta e resposta em disco, para depuração).
+
+### Branches e releases
+
+O projeto segue o **GitHub Flow** com **Versionamento Semântico**:
+
+- **A `main` é o único branch de longa duração.** Ela está sempre pronta para release.
+- **Toda mudança vai num branch curto** chamado `<tipo>/<escopo>-<slug>` (`feat/`, `fix/`, `docs/`, `refactor/`, `test/`, `build/`, `ci/`, `chore/`).
+- **Antes do merge,** a mudança passa pelas verificações de [Desenvolvimento](#desenvolvimento): testes Python e, no gateway, typecheck, testes, build e smoke de instalação. Depois ela entra na `main` com `--no-ff`. Colaboradores externos abrem um pull request contra a `main`.
+- **Commits** seguem o [Conventional Commits](https://www.conventionalcommits.org/), em inglês. Quando o README muda, as duas metades de idioma mudam no mesmo commit.
+- **Uma release** começa num branch `chore/release-vX.Y.Z` com um commit `chore(release): vX.Y.Z` que atualiza as versões. Esse branch entra na `main`, e a tag anotada `vX.Y.Z` é criada na `main`.
+- **Uma correção urgente (hotfix)** é um branch `fix/` a partir da `main`, seguido de uma release de patch.
+
+```mermaid
+gitGraph
+  commit id: "release v1.0.0" tag: "v1.0.0"
+  branch feat/gate-context
+  checkout feat/gate-context
+  commit id: "feat(hooks): ..."
+  commit id: "test(hooks): ..."
+  checkout main
+  merge feat/gate-context id: "merge --no-ff (feat)"
+  branch docs/readme
+  checkout docs/readme
+  commit id: "docs: ..."
+  checkout main
+  merge docs/readme id: "merge --no-ff (docs)"
+  branch chore/release-v1.1.0
+  checkout chore/release-v1.1.0
+  commit id: "chore(release): v1.1.0"
+  checkout main
+  merge chore/release-v1.1.0 id: "release v1.1.0" tag: "v1.1.0"
+  branch fix/redaction
+  checkout fix/redaction
+  commit id: "fix(hooks): ..."
+  checkout main
+  merge fix/redaction id: "merge --no-ff (hotfix)" tag: "v1.1.1"
+```
+
+| Mudança desde a última tag | Próxima versão |
+|---|---|
+| `BREAKING CHANGE:` ou `!` depois do tipo | MAJOR (`2.0.0`) |
+| `feat` | MINOR (`1.1.0`) |
+| `fix`, `perf` | PATCH (`1.0.1`) |
+| só `docs`, `test`, `ci`, `chore`, `style`, `refactor`, `build` | sem release |
+
+A API pública que o SemVer protege cobre três coisas:
+- os nomes e parâmetros das ferramentas MCP;
+- os endpoints HTTP e as variáveis de ambiente do gateway;
+- o comportamento dos hooks descrito neste README.
 
 ### Licença
 
