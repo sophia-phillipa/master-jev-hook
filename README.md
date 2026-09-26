@@ -102,7 +102,7 @@ it, or abstains, the command is blocked (see the Bash row below).
 
 | Event | What it does |
 | --- | --- |
-| `SessionStart` | Injects the orchestration rule into the session, if not already in `CLAUDE.md`; after compaction, reinjects what JEV marked as relevant |
+| `SessionStart` | Injects the orchestration rule into the session, if not already in `CLAUDE.md`; after compaction, reinjects what JEV marked as relevant. Also runs a live, paid self-test (one gateway call, about 300 ms and 540 tokens): the same question in each JEV modality (Choice, Score, Noul), with ✅/⚠️/❌ per modality. It says `Master-JEV Hook gateway active` only when all three answered correctly, and Claude prints the full result verbatim at the top of its next reply, since the desktop app does not show a SessionStart `systemMessage` |
 | `UserPromptSubmit` | Short reminder of the rule on every message |
 | `PreToolUse` (gateway tools) | Announces before each JEV query |
 | `PostToolUse` (gateway tools) | Announces the query result |
@@ -622,7 +622,7 @@ abstiver, o comando é bloqueado (veja a linha do Bash abaixo).
 
 | Evento | O que faz |
 | --- | --- |
-| `SessionStart` | Injeta a regra de orquestração na sessão, se ainda não estiver no `CLAUDE.md`; após compactação, reinjeta o que o JEV marcou como relevante |
+| `SessionStart` | Injeta a regra de orquestração na sessão, se ainda não estiver no `CLAUDE.md`; após compactação, reinjeta o que o JEV marcou como relevante. Também roda um autoteste real e pago (uma chamada ao gateway, cerca de 300 ms e 540 tokens): a mesma pergunta em cada modalidade do JEV (Choice, Score, Noul), com ✅/⚠️/❌ por modalidade. Só diz `Master-JEV Hook gateway active` quando as três respondem corretamente, e o Claude imprime o resultado completo, sem alterar, no topo da próxima resposta, já que o app desktop não mostra o `systemMessage` do SessionStart |
 | `UserPromptSubmit` | Lembrete curto da regra a cada mensagem |
 | `PreToolUse` (ferramentas do gateway) | Avisa antes de cada consulta ao JEV |
 | `PostToolUse` (ferramentas do gateway) | Avisa o resultado da consulta |

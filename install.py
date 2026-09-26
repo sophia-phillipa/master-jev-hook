@@ -24,10 +24,10 @@ CODEX_BEGIN, CODEX_END = "<!-- master-jev-hook:begin -->", "<!-- master-jev-hook
 TOML_BEGIN, TOML_END = "# master-jev-hook:begin", "# master-jev-hook:end"
 TARGETS = ("claude-code", "claude-desktop", "codex")
 JEV_TOOLS = "mcp__" + NAME + "__.*"
-# (event, matcher, claude_jev.py mode, statusMessage, timeout in s): session instructions, a
+# (event, matcher, claude_jev.py mode, statusMessage, timeout in s): session instructions and a live gateway test, a
 # reminder of the rule on every message, a visible notice before/after each JEV MCP tool call, and
 # decision points that consult the gateway (always fail-open).
-HOOKS = (("SessionStart", "startup|resume|clear|compact|fork", "hook", "Master-JEV Hook: Claude instructions", 3),
+HOOKS = (("SessionStart", "startup|resume|clear|compact|fork", "hook", "🔷 Master-JEV Hook: checking the gateway with a live JEV test…", 5),
          ("UserPromptSubmit", None, "prompt", None, 3),
          ("PreToolUse", JEV_TOOLS, "pre", "🔷 Consulting JEV…", 3),
          ("PostToolUse", JEV_TOOLS, "post", None, 3),
