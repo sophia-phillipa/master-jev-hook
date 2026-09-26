@@ -1,5 +1,5 @@
-// How each coding agent is pointed at a gateway. Shared by the launchers and the benchmark runner,
-// so a benchmark drives an agent exactly the way `master-jev-codex`, `master-jev-claude`, and `master-jev-opencode` do.
+// How each coding agent is pointed at a gateway: the launchers `master-jev-codex`, `master-jev-claude`,
+// `master-jev-opencode` and `master-jev-gemini` share these definitions.
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";

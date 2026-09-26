@@ -60,7 +60,6 @@ function normalize(result: SystemOneResult<Questions>): SystemOneResult<Question
   return { model: result.model, answers, usage: { input_tokens: result.usage?.input_tokens ?? 0, output_tokens: result.usage?.output_tokens ?? 0 } } as SystemOneResult<Questions>;
 }
 
-/** The one call the gateway makes to Jev, for whichever provider is configured. */
 /** Statuses meaning the API did not process the request (rate limit, overload): safe to resend. */
 const UNPROCESSED = new Set([429, 503, 529]);
 /** Waits longer than this are not worth it inside a decision's deadline. */
@@ -89,6 +88,7 @@ const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, 
   signal?.addEventListener("abort", stop, { once: true });
 });
 
+/** The one call the gateway makes to Jev, for whichever provider is configured. */
 export function createAskJev(config: Pick<Config, "jevProvider" | "jevApiKey" | "jevUrl" | "jevTimeoutMs"> & Partial<Pick<Config, "jevMaxRetries" | "jevRetryBaseMs">>, fetchImpl: typeof fetch = fetch): AskJev {
   const provider = providers[config.jevProvider];
   if (!config.jevApiKey) {

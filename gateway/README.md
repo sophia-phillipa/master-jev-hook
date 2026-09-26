@@ -33,7 +33,8 @@ Environment variables: see [.env.example](.env.example).
 
 ### License
 
-MIT. See [LICENSE](../LICENSE) and [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+Apache License 2.0. See [LICENSE](../LICENSE) and [NOTICE](../NOTICE); code originally derived from
+MIT-licensed jev-gateway is covered in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 
 ---
 
@@ -66,4 +67,5 @@ Variáveis de ambiente: veja [.env.example](.env.example).
 
 ### Licença
 
-MIT. Veja [LICENSE](../LICENSE) e [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+Apache License 2.0. Veja [LICENSE](../LICENSE) e [NOTICE](../NOTICE); o código originalmente derivado
+do jev-gateway, sob licença MIT, está descrito em [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
