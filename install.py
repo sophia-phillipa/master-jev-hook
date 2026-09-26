@@ -56,7 +56,9 @@ def safe_target(path):
         raise ValueError("Target is not a file: " + str(path))
 
 
-def atomic_write(path, raw, mode=0o600):
+def atomic_write(path, raw, mode=None):
+    if mode is None:  # Keep the user's own permissions on an existing file; new files are private.
+        mode = path.stat().st_mode & 0o777 if path.exists() else 0o600
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(prefix=".jev-", dir=path.parent)
     try:
@@ -206,8 +208,16 @@ def plan(targets, home, prefix, node, code_config, desktop_config, codex_home, g
     changes = {script: (ROOT / "gateway/bin/master-jev-mcp.mjs").read_bytes(),
                helper: (ROOT / "claude_jev.py").read_bytes(), guide_path: guide.encode("utf-8"),
                chat_guide_path: (ROOT / "master-jev-hook-claude-chat.md").read_bytes(),
-               helper_config: (json.dumps({"gateway_url": gateway_url, "guide_in_memory": "claude-code" in targets}, ensure_ascii=False) + "\n").encode("utf-8"),
                prefix / "master-jev-hook-skill.zip": skill_zip(skill)}
+    # The Claude Code hooks' own settings: another target must not rewrite a file the claude-code target made
+    # (guide_in_memory true), but keeps its own copy current, since scripts/verify.sh reads gateway_url from it.
+    try:
+        claude_owned = json.loads(helper_config.read_text(encoding="utf-8")).get("guide_in_memory") is True
+    except (OSError, ValueError, AttributeError):
+        claude_owned = False
+    if "claude-code" in targets or not claude_owned:
+        changes[helper_config] = (json.dumps({"gateway_url": gateway_url, "guide_in_memory": "claude-code" in targets},
+                                             ensure_ascii=False) + "\n").encode("utf-8")
     if "claude-code" in targets:
         settings_path = home / "settings.json"
         safe_target(settings_path)

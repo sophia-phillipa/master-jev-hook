@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,28 +75,102 @@ class DecisionHookTests(unittest.TestCase):
         return str(path)
 
     # --- Bash gate -------------------------------------------------------------------------------
-    def bash(self, command):
+    def bash(self, command, transcript=None):
         return {"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "s1", "cwd": "/w",
-                "tool_input": {"command": command, "description": "d"}}
+                "transcript_path": transcript, "tool_input": {"command": command, "description": "d"}}
+
+    def conversation(self, *prompts):
+        """A transcript with the user's prompts, plus meta and tool-result rows the gate must ignore."""
+        rows = []
+        for prompt in prompts:
+            rows.append({"type": "user", "message": {"role": "user", "content": prompt}})
+            rows.append({"type": "user", "isMeta": True, "message": {"role": "user", "content": "meta note"}})
+            rows.append({"type": "user", "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t", "content": "tool output"}]}})
+        return self.transcript(rows)
 
     def test_bash_gate_skips_routine_commands_without_consulting(self):
         for command in ("ls -la", "git status", "pytest -q", "cat README.md | head", "rmdir empty"):
             self.assertIsNone(self.run_hook("bash-gate", self.bash(command)), command)
         self.assertEqual(self.gateway.requests, [])
 
+    def test_risky_filter_sees_git_global_options(self):
+        sys.path.insert(0, str(self.dir))
+        self.addCleanup(sys.path.remove, str(self.dir))
+        import claude_jev
+        for command in ("git -C /tmp/r reset --hard HEAD~1", 'git -C "/my repo" push --force origin main',
+                        "git --no-pager -c color.ui=never push origin main", "git --git-dir=/r/.git --work-tree=/r clean -fdx",
+                        "git --git-dir /r/.git reset --hard"):
+            self.assertTrue(claude_jev.RISKY_BASH.search(command), command)
+        for command in ("git -C /tmp/r status", "git -c core.pager=cat log -p -1", "git --no-pager diff"):
+            self.assertFalse(claude_jev.RISKY_BASH.search(command), command)
+
     def test_bash_gate_asks_when_jev_flags_risk(self):
-        self.gateway.replies.append((200, choice("risk", "destructive", 0.93)))
-        out = self.run_hook("bash-gate", self.bash("rm -rf build/ && git push --force origin main"))
+        self.gateway.replies.append((200, choice("risk", "confirm", 0.93)))
+        transcript = self.conversation("first", "second", "third", "Clean the build output, token=abc123")
+        out = self.run_hook("bash-gate", self.bash("rm -rf build/ && git push --force origin main", transcript))
         path, body = self.gateway.requests[0]
         self.assertEqual(path, "/master/decide")
-        self.assertEqual(set(body), {"state", "questions"})
+        self.assertEqual(set(body), {"state", "questions", "risk"})
+        self.assertEqual(body["risk"], "medium")
         self.assertEqual(body["state"]["command"], "rm -rf build/ && git push --force origin main")
+        # Last three user prompts, most recent last, redacted; meta and tool results ignored.
+        self.assertEqual(body["state"]["request"], ["second", "third", "Clean the build output, token=[REDACTED]"])
         self.assertEqual(body["questions"]["risk"]["type"], "choice")
-        self.assertEqual(set(body["questions"]["risk"]["criteria"]), {"routine", "confirm", "destructive"})
+        self.assertEqual(set(body["questions"]["risk"]["criteria"]), {"routine", "confirm"})
         decision = out["hookSpecificOutput"]
         self.assertEqual(decision["permissionDecision"], "ask")
-        self.assertIn("destructive", decision["permissionDecisionReason"])
+        self.assertIn("confirm", decision["permissionDecisionReason"])
         self.assertIn("🔷", out["systemMessage"])
+
+    def test_bash_gate_sends_an_empty_request_without_a_transcript(self):
+        for transcript in (None, str(self.dir / "missing.jsonl")):
+            self.gateway.replies.append((200, choice("risk", "routine", 0.9)))
+            self.run_hook("bash-gate", self.bash("rm -rf dist", transcript))
+            self.assertEqual(self.gateway.requests[-1][1]["state"]["request"], [])
+        long = self.conversation("x" * 2000)
+        self.gateway.replies.append((200, choice("risk", "routine", 0.9)))
+        self.run_hook("bash-gate", self.bash("rm -rf dist", long))
+        self.assertEqual(len(self.gateway.requests[-1][1]["state"]["request"][0]), 700)
+
+    SELF_DISABLE_COMMANDS = ("systemctl --user disable --now master-jev-hook", "systemctl --user stop master-jev-hook.service",
+                             "systemctl --user --now disable master-jev-hook", "systemctl -q --user stop master-jev-hook.service")
+
+    def test_bash_gate_lets_the_gateway_turn_off_when_the_request_requires_it(self):
+        transcript = self.conversation("Uninstall the Master-JEV Hook gateway")
+        for command in self.SELF_DISABLE_COMMANDS:
+            self.gateway.replies.append((200, choice("off", "required", 0.95)))
+            out = self.run_hook("bash-gate", self.bash(command, transcript))
+            self.assertNotIn("hookSpecificOutput", out, command)  # never grants permission: normal flow applies
+            self.assertIn("required", out["systemMessage"])
+        _, body = self.gateway.requests[0]
+        self.assertEqual(body["risk"], "medium")
+        self.assertEqual(set(body["questions"]), {"off"})
+        self.assertEqual(set(body["questions"]["off"]["criteria"]), {"required", "not_required"})
+        self.assertEqual(body["state"]["request"], ["Uninstall the Master-JEV Hook gateway"])
+        self.assertNotIn("cwd", body["state"])
+        self.assertEqual(len(self.gateway.requests), len(self.SELF_DISABLE_COMMANDS))
+
+    def test_bash_gate_denies_turning_off_the_gateway_when_not_required_or_unsure(self):
+        transcript = self.conversation("Fix the failing test")
+        for reply in (choice("off", "not_required", 0.9), choice("off", None, 0.5, status="abstain")):
+            for command in self.SELF_DISABLE_COMMANDS:  # option-before-verb variants route here too
+                self.gateway.replies.append((200, reply))
+                out = self.run_hook("bash-gate", self.bash(command, transcript))
+                decision = out["hookSpecificOutput"]
+                self.assertEqual(decision["permissionDecision"], "deny", command)
+                self.assertIn("not required", decision["permissionDecisionReason"])
+                self.assertIn("systemctl --user restart master-jev-hook", decision["permissionDecisionReason"])
+        self.assertTrue(all(set(body["questions"]) == {"off"} for _, body in self.gateway.requests))
+
+    def test_bash_gate_fails_open_on_turning_off_when_the_gateway_is_down(self):
+        self.gateway.replies.append((400, {"status": "fallback", "reason": "invalid_workflow"}))
+        out = self.run_hook("bash-gate", self.bash("systemctl --user stop master-jev-hook"))
+        self.assertNotIn("hookSpecificOutput", out)
+        self.configure("http://127.0.0.1:9")
+        out = self.run_hook("bash-gate", self.bash("systemctl --user stop master-jev-hook"))
+        self.assertNotIn("hookSpecificOutput", out)
+        self.assertIn("no decision", out["systemMessage"])
 
     def test_bash_gate_routine_verdict_and_low_confidence_only_inform(self):
         self.gateway.replies.append((200, choice("risk", "routine", 0.88)))
@@ -198,11 +273,111 @@ class DecisionHookTests(unittest.TestCase):
         _, body = self.gateway.requests[0]
         self.assertEqual(body["state"]["request"], "Fix the bug")
         self.assertEqual(len(body["state"]["recent_actions"]), 15)
+        self.assertNotIn("risk", body)  # default low threshold: the instructions, not a higher bar, avoid false alarms
         self.assertIn("stuck", outputs[14]["hookSpecificOutput"]["additionalContext"])
         self.gateway.replies.append((200, choice("direction", "on_track", 0.9)))
         outputs = [self.run_hook("drift", event) for _ in range(15)]
         self.assertNotIn("hookSpecificOutput", outputs[14])
         self.assertIn("on_track", outputs[14]["systemMessage"])
+
+    # --- Redaction ---------------------------------------------------------------------------------
+    def test_bash_gate_redacts_credentials_in_the_command(self):
+        self.gateway.replies.append((200, choice("risk", "confirm", 0.9)))
+        self.run_hook("bash-gate", self.bash("git push https://user:ghp_SECRETTOKEN123@github.com/o/r.git main"))
+        _, body = self.gateway.requests[0]
+        self.assertEqual(body["state"]["command"], "git push https://[REDACTED]@github.com/o/r.git main")
+        self.assertNotIn("SECRETTOKEN", json.dumps(body))
+
+    def test_drift_sends_only_tool_names_and_targets(self):
+        secret = "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789"
+        transcript = self.turn(("Write", {"file_path": "/w/.env", "content": f"OPENAI_API_KEY={secret}\n"}),
+                               ("Edit", {"file_path": "/w/a.py", "old_string": "x = 1", "new_string": "password = 'hunter2'"}),
+                               ("Bash", {"command": "curl -H 'Authorization: Bearer abc123' https://api.test"}),
+                               *[("Read", {"file_path": f"f{i}"}) for i in range(12)],
+                               prompt="Wire the key OPENAI_API_KEY=" + secret + " into the app")
+        event = {"hook_event_name": "PostToolUse", "tool_name": "Read", "session_id": "s3",
+                 "transcript_path": transcript, "tool_input": {}}
+        self.gateway.replies.append((200, choice("direction", "on_track", 0.9)))
+        for _ in range(15):
+            self.run_hook("drift", event)
+        _, body = self.gateway.requests[0]
+        actions = body["state"]["recent_actions"]
+        self.assertEqual(actions[:2], ["Write /w/.env", "Edit /w/a.py"])
+        self.assertIn("Bearer [REDACTED]", actions[2])
+        sent = json.dumps(body)
+        for leaked in (secret, "hunter2", "abc123", "x = 1"):
+            self.assertNotIn(leaked, sent)
+        self.assertIn("OPENAI_API_KEY=[REDACTED]", body["state"]["request"])
+
+    def test_redact_masks_common_secret_shapes(self):
+        sys.path.insert(0, str(self.dir))
+        self.addCleanup(sys.path.remove, str(self.dir))
+        import claude_jev
+        cases = {
+            "export GITHUB_TOKEN=\"abc def\"": "export GITHUB_TOKEN=[REDACTED]",
+            '{"api_key": "v4lue", "name": "ok"}': '{"api_key": [REDACTED], "name": "ok"}',
+            "mysql -u root --password=hunter2 db": "mysql -u root --password=[REDACTED] db",
+            "sshpass -p hunter2 ssh host": "sshpass -p [REDACTED] ssh host",
+            "mysql -u root -pS3cret db; mkdir -p keep": "mysql -u root -p[REDACTED] db; mkdir -p keep",
+            "mysql -u root -p db": "mysql -u root -p db",
+            "mkdir -p /tmp/a/b && cp -p a b": "mkdir -p /tmp/a/b && cp -p a b",
+            "git log -p -1": "git log -p -1",
+            "docker run -p 8080:80 nginx": "docker run -p 8080:80 nginx",
+            "pg_dump --password s3|gzip": "pg_dump --password [REDACTED]|gzip",
+            "aws AKIAABCDEFGHIJKLMNOP": "aws [REDACTED]",
+            "slack xoxb-123456789012-abcdef": "slack [REDACTED]",
+            "pat github_pat_11ABCDEFG0123456789": "pat [REDACTED]",
+            "rm -rf build/ && git push --force origin main": "rm -rf build/ && git push --force origin main",
+            "Authorization: Bearer x": "Authorization: Bearer [REDACTED]",
+            "curl -H 'auth=abc'": "curl -H 'auth=[REDACTED]'",
+            "curl -H 'X-Auth-Token: abc'": "curl -H 'X-Auth-Token: [REDACTED]'",
+            "export AUTH_TOKEN=abc": "export AUTH_TOKEN=[REDACTED]",
+            '{"auth": "v"}': '{"auth": [REDACTED]}',
+            "Co-Authored-By: Claude Opus": "Co-Authored-By: Claude Opus",
+            "author: Jane": "author: Jane",
+            "Authorization: Basic dXNlcjpwYXNz": "Authorization: Basic [REDACTED]",
+            "curl -H 'Authorization: token abc' x": "curl -H 'Authorization: token [REDACTED]' x",
+            "gh api --token abc123secret x": "gh api --token [REDACTED] x",
+            "tool --api-key abc --secret='s 1'": "tool --api-key [REDACTED] --secret=[REDACTED]",
+            "curl -u admin:hunter2 https://x": "curl -u admin:[REDACTED] https://x",
+            "mysql -u root db": "mysql -u root db",
+            "Authorization happens in the gateway; the token expired, basic idea": (
+                "Authorization happens in the gateway; the token expired, basic idea"),
+        }
+        for raw, expected in cases.items():
+            self.assertEqual(claude_jev.redact(raw), expected, raw)
+        self.assertEqual(claude_jev.redact({"a": ["Bearer xyz", 3]}), {"a": ["Bearer [REDACTED]", 3]})
+
+    def test_patterns_stay_fast_on_adversarial_input(self):
+        sys.path.insert(0, str(self.dir))
+        self.addCleanup(sys.path.remove, str(self.dir))
+        import claude_jev
+        for unit in ("token-", "api_key.", "a.", "-p", "mysql ", "sshpass ", "find ", "curl |", "systemctl stop ",
+                     "systemctl -a ", "x://a", "Authorization: ", "-u a", "git -C x ", "git --a ", "git -c "):
+            raw = (unit * 4000)[:4000]
+            started = time.perf_counter()
+            claude_jev.redact(raw)
+            claude_jev.RISKY_BASH.search(raw)
+            claude_jev.SELF_DISABLE.search(raw)
+            self.assertLess(time.perf_counter() - started, 0.5, unit)
+
+    def test_long_values_are_redacted_before_truncation(self):
+        url = "https://deploy:glpat-ABCDEFGHIJKLMNOPQRST@gitlab.com/x"
+        command = "git push " + "a" * (4000 - len("git push ") - 30) + " " + url  # the 4000 cut falls inside the token
+        self.gateway.replies.append((200, choice("risk", "confirm", 0.9)))
+        self.run_hook("bash-gate", self.bash(command))
+        _, body = self.gateway.requests[0]
+        self.assertNotIn("glpat", json.dumps(body))
+        self.assertLessEqual(len(body["state"]["command"]), 4000)
+        transcript = self.turn(("Bash", {"command": "echo " + "b" * 160 + " " + url}),
+                               *[("Read", {"file_path": f"f{i}"}) for i in range(14)])
+        event = {"hook_event_name": "PostToolUse", "tool_name": "Read", "session_id": "s4",
+                 "transcript_path": transcript, "tool_input": {}}
+        self.gateway.replies.append((200, choice("direction", "on_track", 0.9)))
+        for _ in range(15):
+            self.run_hook("drift", event)
+        _, body = self.gateway.requests[1]
+        self.assertNotIn("glpat", json.dumps(body))
 
 
 if __name__ == "__main__":

@@ -66,7 +66,6 @@ class ClaudeIntegrationTests(unittest.TestCase):
                 self.assertEqual(mcp["env"]["MASTER_JEV_GATEWAY_KEY"], "private")
                 self.assertEqual(mcp["env"]["EXTRA"], "kept")
             self.assertIn("request_decision", before[home / "CLAUDE.md"].decode())
-            self.assertNotIn("Qwen", before[home / "CLAUDE.md"].decode())
             for source in ("startup", "resume", "clear", "compact", "fork"):
                 # Guide already in CLAUDE.md: SessionStart does not repeat it (token savings).
                 result = subprocess.run([sys.executable, str(prefix / "claude_jev.py"), "hook"],
@@ -184,10 +183,10 @@ class ClaudeIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             home, prefix, code, desktop = self.paths(Path(directory))
             (home / "skills/master-jev-hook").mkdir(parents=True)
-            (home / "skills/master-jev-hook/SKILL.md").write_text("minha\n")
+            (home / "skills/master-jev-hook/SKILL.md").write_text("mine\n")
             with self.assertRaisesRegex(ValueError, "master-jev-hook"):
                 install(home, prefix, "claude-code", code, desktop, node=shutil.which("node"))
-            self.assertEqual((home / "skills/master-jev-hook/SKILL.md").read_text(), "minha\n")
+            self.assertEqual((home / "skills/master-jev-hook/SKILL.md").read_text(), "mine\n")
 
     def test_json_configs_with_same_content_keep_their_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -365,18 +364,18 @@ class CodexTests(unittest.TestCase):
         self.assertIn((installer.ROOT / "master-jev-hook-codex.md").read_text().strip(), agents)
         self.assertFalse((self.root / "claude").exists())
         _, backup = self.install()
-        self.assertIsNone(backup)  # Idempotente.
+        self.assertIsNone(backup)  # Idempotent.
 
     def test_existing_config_with_other_servers_is_preserved(self):
         original = 'model = "m"\n\n[mcp_servers.other]\ncommand = "o"\nargs = ["a"]\n'
         self.toml.write_text(original)
-        self.agents.write_text("# Minhas regras\n")
+        self.agents.write_text("# My rules\n")
         self.install()
         data = tomllib.loads(self.toml.read_text())
         self.assertEqual(data["model"], "m")
         self.assertEqual(data["mcp_servers"]["other"], {"command": "o", "args": ["a"]})
         self.assertTrue(self.toml.read_text().startswith(original))
-        self.assertTrue(self.agents.read_text().startswith("# Minhas regras\n\n<!-- master-jev-hook:begin -->"))
+        self.assertTrue(self.agents.read_text().startswith("# My rules\n\n<!-- master-jev-hook:begin -->"))
 
     def test_block_is_replaced_in_place(self):
         self.install()
@@ -387,6 +386,30 @@ class CodexTests(unittest.TestCase):
         self.assertEqual(self.server()["env"]["MASTER_JEV_GATEWAY_URL"], "http://127.0.0.1:9000")
         self.assertEqual(tomllib.loads(text)["mcp_servers"]["after"], {"command": "x"})
         self.assertEqual(self.agents.read_text().count("<!-- master-jev-hook:begin -->"), 1)
+
+    def test_codex_keeps_the_claude_hook_settings(self):
+        helper_config = self.prefix / "claude_jev.json"
+        self.prefix.mkdir()
+        claude = {"gateway_url": "http://127.0.0.1:8795", "guide_in_memory": True}
+        helper_config.write_text(json.dumps(claude))
+        self.install(gateway_url="http://127.0.0.1:9000")
+        self.assertEqual(json.loads(helper_config.read_text()), claude)
+        self.assertEqual(self.server()["env"]["MASTER_JEV_GATEWAY_URL"], "http://127.0.0.1:9000")
+
+    def test_codex_alone_records_its_gateway_for_verify(self):
+        self.install(gateway_url="http://127.0.0.1:9000")
+        self.assertEqual(json.loads((self.prefix / "claude_jev.json").read_text()),
+                         {"gateway_url": "http://127.0.0.1:9000", "guide_in_memory": False})
+        self.install(gateway_url="http://127.0.0.1:9100")  # a later codex-only install with a new URL
+        self.assertEqual(json.loads((self.prefix / "claude_jev.json").read_text()),
+                         {"gateway_url": "http://127.0.0.1:9100", "guide_in_memory": False})
+
+    def test_existing_file_keeps_its_mode_and_new_files_are_private(self):
+        self.agents.write_text("# My rules\n")
+        self.agents.chmod(0o644)
+        self.install()
+        self.assertEqual(self.agents.stat().st_mode & 0o777, 0o644)
+        self.assertEqual(self.toml.stat().st_mode & 0o777, 0o600)
 
     def test_definition_outside_block_fails_without_changes(self):
         for original in ('[mcp_servers.master-jev-hook]\ncommand = "mine"\n',
