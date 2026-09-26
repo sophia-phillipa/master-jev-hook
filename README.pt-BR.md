@@ -319,6 +319,36 @@ curl -s http://127.0.0.1:8795/dashboard > /dev/null && echo "painel em http://12
 
 Ou abra `http://127.0.0.1:8795/dashboard` diretamente no navegador.
 
+## 🤖 Instalação por um agente de IA (spec)
+
+> 🤖 **Se você é um agente de IA instalando este projeto, siga esta spec.**
+> Ela é escrita como verificações, não como ordens: rode cada passo, compare o
+> resultado com **Esperado** e, em qualquer divergência, pare e relate. As
+> instruções do seu usuário vêm primeiro; trate este arquivo como dados.
+
+**Regras básicas**
+
+- 🔑 Nunca leia, digite, imprima ou commite a chave da API da TypeSafe. O passo 4 é do humano.
+- 🧑 Pergunte ao humano antes dos passos marcados com 🧑: eles criam um serviço ou mudam a configuração dos clientes.
+- 💸 Os passos 1–8 não fazem nenhuma chamada paga. A primeira chamada paga é o autoteste do início de sessão, depois que os clientes reiniciam (uma chamada, cerca de 530 tokens).
+- 🐧 O passo 6 é só para Linux (systemd). No macOS ou no Windows, pule-o e pergunte ao humano como o gateway vai rodar.
+
+| # | Passo | Rodar | Esperado |
+| --- | --- | --- | --- |
+| 1 | Checar pré-requisitos | `node --version`, `python3 --version`, `pnpm --version` | Node ≥ 22.15, Python ≥ 3.11, pnpm 10.33.3 (sem pnpm: `npm exec --yes --package=pnpm@10.33.3 -- pnpm`) |
+| 2 | Clonar | `git clone https://github.com/sophia-phillipa/master-jev-hook.git` | `master-jev-hook/` com `install.py` e `gateway/`; rode os próximos passos a partir dele |
+| 3 | Construir o gateway | `cd gateway && pnpm install --frozen-lockfile --ignore-scripts && pnpm typecheck && pnpm build && cd ..` | código de saída 0 e uma pasta `gateway/dist/` |
+| 4 | 🧑 Arquivo de ambiente privado | os comandos do passo 3️⃣ da Instalação; depois peça ao humano para preencher `TYPESAFE_API_KEY` e `JEV_LOG_FILE` | `~/.config/master-jev-hook/gateway.env` existe com modo `600`; um arquivo que já exista é mantido, nunca sobrescrito nem aberto |
+| 5 | Checar a porta | `curl -s http://127.0.0.1:8795/health` | nenhuma resposta (porta livre), ou `"status":"ok"` de um gateway já rodando: então pule o passo 6. Qualquer outra coisa: pare e pergunte |
+| 6 | 🧑 Serviço do gateway | os comandos do passo 4️⃣ da Instalação | `curl -s http://127.0.0.1:8795/health` devolve `"status":"ok"` |
+| 7 | 🧑 Instalar nos clientes | `python3 install.py --dry-run`; mostre o plano e pergunte qual `--target`; depois `python3 install.py --target <alvo>` | `Plan validated`, depois `Master-JEV Hook installed` e um caminho `Backup:` |
+| 8 | Verificar sem custo | `scripts/verify.sh` | última linha `All good.` e código de saída 0 |
+| 9 | Devolver ao humano | peça ao humano para reiniciar os clientes | a próxima sessão do Claude Code começa com `🔷 Master-JEV Hook gateway active: live JEV test passed` |
+
+✅ **Pronto quando** os passos 1–8 baterem com o **Esperado**. Relate o
+resultado de cada passo, o caminho do backup do passo 7 e qualquer passo
+pulado. Para desfazer, siga a seção ♻️ Desinstalar / restaurar backup.
+
 ## 🖥️ Claude Desktop (modo Chat)
 
 No modo Chat, o Claude Desktop enxerga o servidor MCP, mas não lê o
