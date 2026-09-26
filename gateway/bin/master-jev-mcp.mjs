@@ -77,9 +77,12 @@ function buildScore(args) {
     if (!isPlainObject(args.weights) || Object.keys(args.weights).length === 0) invalid("Invalid weights");
     for (const [k, v] of Object.entries(args.weights)) {
       if (!ids.includes(k)) invalid(`Weight references unknown criterion id "${k}"`);
-      if (typeof v !== "number" || !Number.isFinite(v)) invalid("Invalid weight value");
+      if (typeof v !== "number" || !Number.isFinite(v) || v < 0) invalid("Invalid weight value: expected a non-negative number");
     }
-    composite = args.weights;
+    // The gateway wants weights in [0, 1] that sum to 1; relative weights are normalized here.
+    const sum = Object.values(args.weights).reduce((a, b) => a + b, 0);
+    if (!(sum > 0 && Number.isFinite(sum))) invalid("Invalid weights: their sum must be positive and finite");
+    composite = Object.fromEntries(Object.entries(args.weights).map(([k, v]) => [k, v / sum]));
   }
   return withRisk({ state: args.state, questions, ...(composite ? { composite } : {}) }, args);
 }
@@ -107,10 +110,19 @@ function rankResult(result, args) {
   if (!isPlainObject(result)) return result;
   const order = args.candidates.map((c) => c.id);
   const answers = isPlainObject(result.answers) ? result.answers : {};
-  const ranking = order
-    .filter((id) => answers[id]?.status === "ok" && typeof answers[id].score === "number")
-    .sort((a, b) => answers[b].score - answers[a].score);
-  return { ...result, ranking };
+  const isOk = (id) => answers[id]?.status === "ok" && typeof answers[id].score === "number";
+  // ranking[0] is only the best among accepted candidates: if the strongest candidates abstained,
+  // it is not the overall best. abstained lists everyone left out, in input order, so a caller can
+  // tell the two cases apart before treating ranking[0] as the answer.
+  const ranking = order.filter(isOk).sort((a, b) => answers[b].score - answers[a].score);
+  const abstained = order.filter((id) => !isOk(id));
+  return { ...result, ranking, abstained };
+}
+
+function buildDecision(args) {
+  if (args.risk === undefined) return { objective: args.objective, context: args.context };
+  if (args.context?.risk !== undefined && args.context.risk !== args.risk) invalid("Conflicting risk: top-level risk and context.risk differ");
+  return { objective: args.objective, context: { ...args.context, risk: args.risk } };
 }
 
 const tools = [
@@ -124,15 +136,16 @@ const tools = [
         criterion: text8000, claim: text8000,
         candidates: { type: "array", minItems: 2, maxItems: 32, items: item },
         evidence: { type: "array", maxItems: 32, items: item },
-        risk: { type: "string", enum: ["low", "medium", "high"], description: "Risk of the decided action: low (0.65), medium (0.80) or high (0.90) minimum confidence." },
+        risk,
       } },
+      risk,
     } },
     path: "/master/context",
-    build: (args) => args,
+    build: buildDecision,
   },
   {
     name: "jev_classify",
-    description: "Asks the JEV to classify each item into the best-fitting category, via /master/decide (confidence threshold 0.65; below that the item is left uncategorized).",
+    description: "Asks the JEV to classify each item into the best-fitting category, via /master/decide (confidence threshold 0.65/0.80/0.90 by risk low/medium/high; below that the item is left uncategorized).",
     inputSchema: { type: "object", additionalProperties: false, required: ["categories", "items"], properties: {
       purpose: text8000,
       categories: { type: "array", minItems: 2, maxItems: 64, items: item },
@@ -156,14 +169,14 @@ const tools = [
   },
   {
     name: "jev_score",
-    description: "Asks the JEV to score one or more criteria on the given state, via /master/decide (confidence threshold 0.65); with weights, the gateway also computes a composite value.",
+    description: "Asks the JEV to score one or more criteria on the given state, via /master/decide (confidence threshold 0.65/0.80/0.90 by risk low/medium/high); with weights, the gateway also computes a composite value.",
     inputSchema: { type: "object", additionalProperties: false, required: ["state", "criteria"], properties: {
       state: text8000,
       criteria: { type: "array", minItems: 1, maxItems: 32, items: { type: "object", additionalProperties: false, required: ["id", "question", "levels"], properties: {
         id: { type: "string", pattern: "^[A-Za-z0-9_-]{1,64}$" }, question: text8000,
         levels: { type: "array", minItems: 2, maxItems: 10, items: text8000 },
       } } },
-      weights: { type: "object" },
+      weights: { type: "object", additionalProperties: { type: "number", minimum: 0 }, description: "Optional relative weight per criterion id (non-negative, positive sum); normalized to sum to 1." },
       risk,
     } },
     path: "/master/decide",
@@ -171,7 +184,7 @@ const tools = [
   },
   {
     name: "jev_rank",
-    description: "Asks the JEV to score candidates against a criterion, via /master/decide (confidence threshold 0.65), and also returns a ranking field with the accepted candidates ordered by score.",
+    description: "Asks the JEV to score candidates against a criterion, via /master/decide (confidence threshold 0.65/0.80/0.90 by risk low/medium/high). Also returns `ranking` (accepted candidate ids ordered by score) and `abstained` (candidate ids left out, in input order). ranking[0] is the best only among accepted candidates: check abstained is empty before treating it as the overall best.",
     inputSchema: { type: "object", additionalProperties: false, required: ["criterion", "candidates"], properties: {
       criterion: text8000,
       candidates: { type: "array", minItems: 2, maxItems: 32, items: item },
@@ -185,13 +198,18 @@ const tools = [
 ];
 
 // Standard MCP guidance, including for clients without CLAUDE.md/SessionStart hooks.
-const instructions = "When explicit eligible alternatives exist, consult the JEV before deciding: request_decision (objective + context with candidates, criterion, evidence) or, for batches, jev_classify, jev_verify, jev_score and jev_rank. Keep state lean, no secrets; independent questions in a single call. State the risk of the action (risk): the gateway requires minimum confidence 0.65 (low), 0.80 (medium) or 0.90 (high) on Choice/Score; Noul is the probability of yes, not a confidence. Abstention or error: local alternative, no retry. Announce with one line before and after each call. The result does not execute actions nor grant permissions.";
+const instructions = "When explicit eligible alternatives exist, consult the JEV before deciding: request_decision (objective + context with candidates, criterion, evidence) or, for batches, jev_classify, jev_verify, jev_score and jev_rank. Keep state lean, no secrets; independent questions in a single call. Each request is capped at 64 KB (32 KB for request_decision's context), below the per-field schema maximums: keep items short. State the risk of the action (risk): the gateway requires minimum confidence 0.65 (low), 0.80 (medium) or 0.90 (high) on Choice/Score; Noul is the probability of yes, not a confidence. Abstention or error: local alternative, no retry. Announce with one line before and after each call. The result does not execute actions nor grant permissions.";
 const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
 const error = (id, code, message) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }) + "\n");
+// Fits the largest call the schemas allow (jev_classify: 96 texts of 8000 chars, up to 3 UTF-8
+// bytes each, plus JSON framing); the gateway applies its own, smaller body limit.
+const MAX_LINE_BYTES = 4 * 1024 * 1024;
 for await (const line of createInterface({ input: process.stdin, crlfDelay: Infinity })) {
   let message;
-  try { if (Buffer.byteLength(line) > 65536) throw new Error(); message = JSON.parse(line); }
+  try { message = JSON.parse(line); }
   catch { error(null, -32700, "Invalid JSON request"); continue; }
+  // Parsed first so an oversized call still gets an error with its own id.
+  if (Buffer.byteLength(line) > MAX_LINE_BYTES) { error(message?.id ?? null, -32600, "Request too large"); continue; }
   if (!message || typeof message !== "object" || message.jsonrpc !== "2.0") { error(message?.id ?? null, -32600, "Invalid request"); continue; }
   if (message.id === undefined) continue;
   if (message.method === "initialize") {

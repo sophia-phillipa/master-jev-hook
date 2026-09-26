@@ -4,7 +4,7 @@
 // TYPESAFE_BASE_URL, so:
 //
 //   MOCK_JEV_SCRIPT=exec_command,no_tool_needed node scripts/mock-jev.mjs &
-//   TYPESAFE_BASE_URL=http://127.0.0.1:8799 TYPESAFE_API_KEY=mock master-jev-codex exec "…"
+//   TYPESAFE_BASE_URL=http://127.0.0.1:8789 TYPESAFE_API_KEY=mock master-jev-codex exec "…"
 //
 // It answers whatever question keys it is sent (see src/questions.ts): scripted for `tool`,
 // consistent for `needs_tool`, deliberately unsure for arguments.
@@ -12,7 +12,7 @@ import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const PORT = Number(process.env.MOCK_JEV_PORT ?? 8799);
+const PORT = Number(process.env.MOCK_JEV_PORT ?? 8789);
 const NO_TOOL = "no_tool_needed";
 // One `tool` answer per request, in order; the last one repeats. An agent loop needs this:
 // "always pick the shell" never lets the turn end.
@@ -43,7 +43,7 @@ function answer(key, question, wanted) {
   }
   if (key === "needs_tool") return { type: "noul", noul: wanted === NO_TOOL ? 0.1 : 0.9 };
   if (question.type === "noul") return { type: "noul", noul: ARG_CERTAINTY };
-  if (question.type === "score") return { type: "score", score: 0.5 };
+  if (question.type === "score") return { type: "score", score: 0.5, confidence: ARG_CERTAINTY };
   const options = Object.keys(question.criteria ?? {});
   return {
     type: "choice",

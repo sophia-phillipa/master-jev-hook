@@ -64,6 +64,29 @@ describe("context evaluation without tools", () => {
     expect((await app.request("/master/context", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ objective: "x", context: { kind: "comparison", risk: "huge" } }) })).status).toBe(400);
   });
 
+  it("reports the specific /master/context error reason instead of a generic invalid_context", async () => {
+    const f = fakeJev({ selection: { choice: "A", confidence: 0.85 } });
+    const app = createApp({ config: testConfig({ contextRouting: true }), askJev: f.askJev });
+    const post = async (context: object) => (await (await app.request("/master/context", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ objective: "Escolha", context }) })).json()) as any;
+    await expect(post({ kind: "comparison", candidates: [{ id: "A", text: "one" }, { id: "A", text: "two" }] })).resolves.toMatchObject({ status: "fallback", reason: "duplicate_context_ids" });
+    await expect(post({ kind: "comparison", candidates: [{ id: "A", text: "one" }] })).resolves.toMatchObject({ status: "fallback", reason: "invalid_candidates" });
+    await expect(post({ kind: "factual", claim: "a".repeat(7999), evidence: [0, 1, 2, 3].map((i) => ({ id: `e${i}`, text: "b".repeat(7000) })) })).resolves.toMatchObject({ status: "fallback", reason: "context_too_large" });
+    const missing = await (await app.request("/master/context", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ objective: "Escolha" }) })).json() as any;
+    expect(missing).toMatchObject({ status: "fallback", reason: "missing_context" });
+    const badObjective = await (await app.request("/master/context", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ objective: "", context: { kind: "comparison", candidates: [{ id: "A", text: "one" }, { id: "B", text: "two" }] } }) })).json() as any;
+    expect(badObjective).toMatchObject({ status: "fallback", reason: "invalid_context" });
+  });
+
+  it("reports context_request_too_large (not a generic evaluation failure) when only the built request overshoots", async () => {
+    // The supplied decision_context is tiny (well under the 32768-byte door check on its own);
+    // the oversized conversation turn is what pushes the built { state, questions } past 65536.
+    const big = { ...input, turns: [{ role: "user" as const, text: "x".repeat(70_000) }] };
+    const supplied = parseDecisionContext({ kind: "comparison" as const, criterion: "c", candidates: [{ id: "A", text: "a" }, { id: "B", text: "b" }] });
+    const ask: AskJev = async () => { throw new Error("must not call Jev"); };
+    const r = await assessContext(big, supplied, cfg(), ask);
+    expect(r).toMatchObject({ status: "fallback", reason: "context_request_too_large", calls: 0 });
+  });
+
   it("validates harness metadata without silently clipping evidence", () => {
     expect(() => parseDecisionContext({ ...extension, extra: true })).toThrow();
     expect(() => parseDecisionContext({ kind: "comparison", candidates: [{ id: "A", text: "one" }, { id: "A", text: "two" }] })).toThrow();

@@ -80,6 +80,21 @@ describe("batches, chains, composite and cascade", () => {
       expect((await runWorkflow(parseWorkflow(chain), f.ask, "test", 0.65)).cascade?.route).toBe(route);
     }
   });
+  it("does not let a zero-weight criterion void an otherwise-complete composite", async () => {
+    const plan = parseWorkflow({ state: "s", questions: {
+      ci: { type: "score", instructions: "CI health", criteria: ["fail", "flaky", "pass"] },
+      elegance: { type: "score", instructions: "Code elegance", criteria: ["poor", "fair", "good"] },
+    }, composite: { ci: 1, elegance: 0 } });
+    const ask: AskJev = async () => ({ model: "test", usage: { input_tokens: 1, output_tokens: 1 }, answers: {
+      ci: { type: "score", score: 2, confidence: 0.97 },
+      elegance: { type: "score", score: 0, confidence: 0.1 }, // below threshold: abstains, but carries zero weight
+    } }) as any;
+    const r = await runWorkflow(plan, ask, "test", 0.65);
+    expect(r.answers.ci?.status).toBe("ok");
+    expect(r.answers.elegance?.status).toBe("abstain");
+    expect(r.composite).toEqual({ status: "ok", value: 1, weights: { ci: 1, elegance: 0 } });
+  });
+
   it("accepts the existing CLI batch format in one call", async () => {
     const f = fake(), plan = parseWorkflow({ state: "source", questions: { logic: score, support: score }, composite: { logic: 0.4, support: 0.6 } });
     expect((await runWorkflow(plan, f.ask, "test", 0.65)).composite?.value).toBe(0.7);
@@ -100,6 +115,35 @@ describe("batches, chains, composite and cascade", () => {
     const ask: AskJev = async (request) => ++count === 1 ? f.ask(request) : { model: "x", answers: {}, usage: { input_tokens: 1, output_tokens: 1 } };
     const r = await runWorkflow(parseWorkflow(chain), ask, "test", 0.65);
     expect(r.status).toBe("fallback"); expect(r.composite?.value).toBeNull(); expect(r.cascade?.route).toBe("abstain");
+  });
+});
+
+describe("upstream request size ceiling", () => {
+  // Each question grows by the fixed untrusted-data prefix once runWorkflow builds the upstream
+  // request (see runWorkflow); a single-question, score-type batch keeps that growth to
+  // exactly one prefix, with no per-criterion "abstain" addition, so the two byte counts are
+  // predictable from the padding length alone.
+  const rawWithPad = (padLen: number) => ({ state: "s", questions: { q: { type: "score", instructions: "x".repeat(padLen), criteria: ["a", "b"] } } });
+
+  it("succeeds when the built request lands at the usable ceiling", async () => {
+    const plan = parseWorkflow(rawWithPad(65385)); // raw: 65472 B (under the door limit); built: 65536 B (right at the ceiling)
+    const ask: AskJev = async (request) => {
+      expect(Buffer.byteLength(JSON.stringify(request))).toBeLessThanOrEqual(65536);
+      return { model: "test", usage: { input_tokens: 1, output_tokens: 1 }, answers: { q: { type: "score", score: 1, confidence: 0.9 } } } as any;
+    };
+    const r = await runWorkflow(plan, ask, "test", 0.65);
+    expect(r).toMatchObject({ status: "ok", calls: 1 });
+  });
+
+  it("reports request_too_large without calling Jev when only the built request overshoots", async () => {
+    const plan = parseWorkflow(rawWithPad(65449)); // raw: 65536 B (right at the door limit); built: 65600 B (over the ceiling)
+    const ask: AskJev = async () => { throw new Error("must not call Jev"); };
+    const r = await runWorkflow(plan, ask, "test", 0.65);
+    expect(r).toMatchObject({ status: "fallback", reason: "request_too_large", calls: 0 });
+  });
+
+  it("rejects a raw workflow over the door limit before any of this", () => {
+    expect(() => parseWorkflow(rawWithPad(65450))).toThrow("invalid_workflow");
   });
 });
 

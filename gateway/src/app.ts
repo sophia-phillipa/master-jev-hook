@@ -41,6 +41,9 @@ const MAX_ROUTED_BODY_BYTES = 32 * 1024 * 1024;
 /** Largest /master/* request: decisions carry short texts, not conversations. */
 const MAX_MASTER_BODY_BYTES = 65536;
 
+/** Specific reasons parseDecisionContext (or /master/context itself) can throw; anything else collapses to invalid_context. */
+const CONTEXT_ERROR_REASONS = new Set(["invalid_context", "duplicate_context_ids", "invalid_candidates", "context_too_large", "missing_context"]);
+
 const DECODERS: Record<string, (data: Uint8Array, options: { maxOutputLength: number }) => Buffer> = {
   zstd: zstdDecompressSync,
   gzip: gunzipSync,
@@ -336,8 +339,9 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
       log({ event: "route", time: new Date().toISOString(), path: "/master/context", tools: 0, mode: "passthrough", reason: "decision_only", context });
       const { inspection, ...response } = context;
       return c.json(response);
-    } catch {
-      return c.json({ status: "fallback", reason: "invalid_context" }, 400);
+    } catch (err) {
+      const reason = err instanceof Error && CONTEXT_ERROR_REASONS.has(err.message) ? err.message : "invalid_context";
+      return c.json({ status: "fallback", reason }, 400);
     }
   });
 

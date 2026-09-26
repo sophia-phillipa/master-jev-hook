@@ -132,6 +132,28 @@ it("jev_score builds one score question per criterion and forwards weights as co
   });
 });
 
+it("jev_score normalizes relative weights so the gateway accepts them", async () => {
+  const gw = fakeGateway({ status: "ok", answers: {}, stages: [], calls: 1, inputTokens: 0, outputTokens: 0, latencyMs: 1 });
+  const criteria = [{ id: "a", question: "q", levels: ["l", "h"] }, { id: "b", question: "q", levels: ["l", "h"] }];
+  const rows = await runAdapter(gw.handler, [
+    { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "jev_score", arguments: { state: "s", criteria, weights: { a: 2, b: 0 } } } },
+    { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "jev_score", arguments: { state: "s", criteria, weights: { a: 0, b: 0 } } } },
+    { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "jev_score", arguments: { state: "s", criteria, weights: { a: -1, b: 2 } } } },
+  ]);
+  expect(rows[0].result.isError).toBe(false);
+  expect(gw.received.body.composite).toEqual({ a: 1, b: 0 });
+  expect(rows[1].error?.code).toBe(-32602);
+  expect(rows[2].error?.code).toBe(-32602);
+});
+
+it("answers an oversized line with an error that carries its id", async () => {
+  const gw = fakeGateway();
+  const big = { jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "jev_verify", arguments: { question: "q", state: "x".repeat(5 * 1024 * 1024) } } };
+  const rows = await runAdapter(gw.handler, [big]);
+  expect(rows[0]).toMatchObject({ id: 7, error: { code: -32600 } });
+  expect(gw.received).toBeUndefined();
+});
+
 it("jev_score without weights omits the composite field", async () => {
   const gw = fakeGateway({ status: "ok", answers: {}, stages: [], calls: 1, inputTokens: 0, outputTokens: 0, latencyMs: 1 });
   const args = { state: "Proposal Y", criteria: [{ id: "risk_level", question: "What is the risk?", levels: ["low", "high"] }] };
@@ -167,6 +189,29 @@ it("jev_rank builds one score question per candidate and adds a ranking sorted b
   });
   const payload = JSON.parse(rows[0].result.content[0].text);
   expect(payload.ranking).toEqual(["b", "c", "a"]);
+  expect(payload.abstained).toEqual(["d"]);
+});
+
+it("jev_rank lists abstained candidates in input order so a caller can spot a bad ranking[0]", async () => {
+  // All the strong candidates abstain; only the weak one is accepted. ranking[0] is still "weak"
+  // (the best among accepted candidates), but a non-empty `abstained` warns it is not the overall best.
+  const gw = fakeGateway({
+    status: "partial",
+    answers: {
+      strong1: { type: "score", status: "abstain", score: null, confidence: 0.5 },
+      strong2: { type: "score", status: "abstain", score: null, confidence: 0.5 },
+      weak: { type: "score", status: "ok", score: 0, confidence: 0.9 },
+    },
+    stages: [], calls: 1, inputTokens: 0, outputTokens: 0, latencyMs: 1,
+  });
+  const args = {
+    criterion: "Best fit",
+    candidates: [{ id: "strong1", text: "Strong 1" }, { id: "strong2", text: "Strong 2" }, { id: "weak", text: "Weak" }],
+  };
+  const rows = await runAdapter(gw.handler, [{ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "jev_rank", arguments: args } }]);
+  const payload = JSON.parse(rows[0].result.content[0].text);
+  expect(payload.ranking).toEqual(["weak"]);
+  expect(payload.abstained).toEqual(["strong1", "strong2"]);
 });
 
 it("jev_rank accepts custom levels", async () => {
@@ -199,6 +244,21 @@ it("risk maps to the gateway risk level on every batch tool, and request_decisio
   expect(gw.received.body).toEqual(args);
   const rejected = fakeGateway();
   const rows = await runAdapter(rejected.handler, [{ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "jev_verify", arguments: { question: "p", state: "e", risk: "extreme" } } }]);
+  expect(JSON.stringify(rows)).toContain("-32602");
+  expect(rejected.received).toBeUndefined();
+});
+
+it("request_decision accepts a top-level risk and moves it into context.risk", async () => {
+  const gw = fakeGateway();
+  const args = { objective: "o", context: { kind: "comparison", candidates: [{ id: "A", text: "a" }, { id: "B", text: "b" }] }, risk: "high" };
+  await runAdapter(gw.handler, [{ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "request_decision", arguments: args } }]);
+  expect(gw.received.body).toEqual({ objective: "o", context: { kind: "comparison", candidates: [{ id: "A", text: "a" }, { id: "B", text: "b" }], risk: "high" } });
+});
+
+it("request_decision rejects a top-level risk that conflicts with context.risk", async () => {
+  const rejected = fakeGateway();
+  const args = { objective: "o", context: { kind: "comparison", risk: "low", candidates: [{ id: "A", text: "a" }, { id: "B", text: "b" }] }, risk: "high" };
+  const rows = await runAdapter(rejected.handler, [{ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "request_decision", arguments: args } }]);
   expect(JSON.stringify(rows)).toContain("-32602");
   expect(rejected.received).toBeUndefined();
 });

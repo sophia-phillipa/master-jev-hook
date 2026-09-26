@@ -153,9 +153,12 @@ export async function assessContext(input: RouterInput, supplied: DecisionContex
     const accepted = assessments.filter((a) => a.status === "accepted").length;
     report.status = accepted === 0 ? "abstain" : accepted === assessments.length ? "accepted" : "partial";
     return report;
-  } catch {
+  } catch (error) {
     // A later failure invalidates this report for steering; telemetry still records incurred calls.
-    return Object.assign(report, { status: "fallback" as const, reason: "context_evaluation_failed", assessments: {} });
+    // A too-large built request (query()'s own check) gets its own clear reason instead
+    // of the generic one, so the caller can tell it apart from a genuine evaluation failure.
+    const reason = error instanceof Error && error.message === "context_request_too_large" ? "context_request_too_large" : "context_evaluation_failed";
+    return Object.assign(report, { status: "fallback" as const, reason, assessments: {} });
   } finally {
     report.latencyMs = Math.round(performance.now() - started);
   }

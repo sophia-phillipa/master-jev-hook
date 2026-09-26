@@ -27,7 +27,7 @@ const obj = (x: unknown): x is Record<string, any> => !!x && typeof x === "objec
 const id = (x: unknown): x is string => typeof x === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(x) && !["abstain", "__proto__", "constructor", "prototype"].includes(x);
 const str = (x: unknown): x is string => typeof x === "string" && !!x.trim();
 const num = (x: unknown, high = 1): x is number => typeof x === "number" && Number.isFinite(x) && x >= 0 && x <= high;
-function requireValid(valid: unknown): asserts valid { if (!valid) throw new Error("invalid_workflow"); }
+function requireValid(valid: unknown, message = "invalid_workflow"): asserts valid { if (!valid) throw new Error(message); }
 
 /** Compatible with CLI state/questions/composite/cascade; stages add explicit Choice dependencies. */
 export function parseWorkflow(raw: unknown): Workflow {
@@ -92,7 +92,8 @@ export async function runWorkflow(plan: Workflow, ask: AskJev, model: string, th
       }])) as Questions;
       const state = result.stages.length ? { data: plan.state, previous_answers: result.answers } : plan.state;
       const request = { state, questions, model } as SystemOneRequest<Questions>;
-      requireValid(Buffer.byteLength(JSON.stringify(request)) <= 65536);
+      // The prefix and "abstain" criterion can push a batch that fit at the door over the limit: fail clearly, never call Jev.
+      requireValid(Buffer.byteLength(JSON.stringify(request)) <= 65536, "request_too_large");
       result.calls++;
       const reply = await ask(request, signal);
       if (num(reply.usage?.input_tokens, Number.MAX_SAFE_INTEGER)) result.inputTokens += reply.usage.input_tokens;
@@ -121,13 +122,17 @@ export async function runWorkflow(plan: Workflow, ask: AskJev, model: string, th
     }
     const accepted = Object.values(result.answers).filter((a) => a.status === "ok").length;
     result.status = accepted === Object.keys(result.answers).length ? "ok" : accepted === 0 ? "abstain" : "partial";
-  } catch {
-    result.status = "fallback"; result.reason = "workflow_evaluation_failed";
+  } catch (error) {
+    result.status = "fallback";
+    result.reason = error instanceof Error && error.message === "request_too_large" ? "request_too_large" : "workflow_evaluation_failed";
     // Invalid or timed-out flows never produce a weighted decision from partial execution.
   }
   if (plan.composite) {
-    const valid = result.status !== "fallback" && Object.keys(plan.composite).every((k) => result.answers[k]?.status === "ok");
-    result.composite = { status: valid ? "ok" : "abstain", weights: plan.composite, value: valid ? Object.entries(plan.composite).reduce((sum, [k, weight]) => sum + weight * result.answers[k]!.score! / ((all[k]!.criteria as string[]).length - 1), 0) : null };
+    // A criterion weighted at 0 contributes nothing to the value, so it must not gate validity:
+    // it may abstain, be skipped, or even be missing, without voiding an otherwise-complete composite.
+    const weighted = Object.entries(plan.composite).filter(([, weight]) => weight > 0);
+    const valid = result.status !== "fallback" && weighted.every(([k]) => result.answers[k]?.status === "ok");
+    result.composite = { status: valid ? "ok" : "abstain", weights: plan.composite, value: valid ? weighted.reduce((sum, [k, weight]) => sum + weight * result.answers[k]!.score! / ((all[k]!.criteria as string[]).length - 1), 0) : null };
   }
   if (plan.cascade) {
     const c = plan.cascade, valid = result.status !== "fallback" && c.questions.every((k) => result.answers[k]?.status === "ok");
