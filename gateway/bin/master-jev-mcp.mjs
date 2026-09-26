@@ -214,7 +214,7 @@ for await (const line of createInterface({ input: process.stdin, crlfDelay: Infi
   if (message.id === undefined) continue;
   if (message.method === "initialize") {
     const supported = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
-    reply(message.id, { protocolVersion: supported.includes(message.params?.protocolVersion) ? message.params.protocolVersion : "2025-06-18", capabilities: { tools: {} }, instructions, serverInfo: { name: "master-jev-hook", version: "1.0.0" } });
+    reply(message.id, { protocolVersion: supported.includes(message.params?.protocolVersion) ? message.params.protocolVersion : "2025-06-18", capabilities: { tools: {} }, instructions, serverInfo: { name: "master-jev-hook", version: "1.1.0" } });
   } else if (message.method === "ping") reply(message.id, {});
   else if (message.method === "tools/list") reply(message.id, { tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) });
   else if (message.method === "tools/call") {
