@@ -143,7 +143,7 @@ it, or abstains, the command is blocked (see the Bash row below).
 | `PreToolUse` (Bash) | If a local filter finds the command risky, asks JEV whether you need to be asked; asks you only when JEV is ≥ 0.80 sure the command is severe, irreversible and beyond what you asked, otherwise the normal permission flow applies. It sends your last 3 messages (redacted, truncated) as context, so commands you asked for run without questions. A command that turns off the `master-jev-hook` gateway (`systemctl` `stop`/`disable`/`mask`/`kill`) is checked against your request: if your request requires it, it runs; otherwise it is blocked with a reason to the agent. You are never asked about it, and the gate never allows a command on its own |
 | `Stop` | If there was an edit without verification afterward, asks JEV; alerts the agent, at most three times per session |
 | `PreCompact` | Asks JEV, message by message, what is worth preserving before compacting |
-| `PostToolUse` (all tools) | Every 15 tool calls, asks JEV whether the session is still on track, stuck, or has drifted out of scope |
+| `PostToolUse` (all tools) | Every 30 tool calls, asks JEV whether the session is still on track, stuck, or has drifted out of scope |
 
 ### Dashboard
 
@@ -416,9 +416,11 @@ What each path sends to JEV (the API key never leaves the gateway process):
   (up to 3,000 characters).
 - **Compaction** (PreCompact): up to 32 of the user's own messages from the
   transcript (up to 1,500 characters each).
-- **Drift detector** (every 15 tool calls): the user's last request and, for
-  the latest tool calls, only the tool name and its file path or command —
-  never file contents or edit strings.
+- **Drift detector** (every 30 tool calls): the user's last request plus the
+  four before it (up to 1,500 characters each), the last 1,000 characters of
+  the agent's reply right before the request and, for the latest tool calls,
+  only the tool name, its file path or command, and whether it failed —
+  never file contents, edit strings or tool output.
 
 Before sending, the hooks mask obvious secrets on a best-effort basis:
 credentials in URLs (`https://user:token@…`), `Bearer` tokens and
