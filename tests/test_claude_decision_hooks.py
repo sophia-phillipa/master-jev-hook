@@ -192,11 +192,16 @@ class DecisionHookTests(unittest.TestCase):
         self.assertNotIn("hookSpecificOutput", out or {})
 
     # --- Stop check --------------------------------------------------------------------------------
-    def turn(self, *tools, prompt="Fix the bug"):
-        entries = [{"type": "user", "message": {"role": "user", "content": prompt}}]
-        for name, tool_input in tools:
+    def turn(self, *tools, prompt="Fix the bug", earlier=(), errors=(), reply=None):
+        entries = [{"type": "user", "message": {"role": "user", "content": p}} for p in earlier]
+        if reply:
+            entries.append({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": reply}]}})
+        entries.append({"type": "user", "message": {"role": "user", "content": prompt}})
+        for i, (name, tool_input) in enumerate(tools):
             entries.append({"type": "assistant", "message": {"role": "assistant", "content": [
-                {"type": "tool_use", "id": "t", "name": name, "input": tool_input}]}})
+                {"type": "tool_use", "id": f"t{i}", "name": name, "input": tool_input}]}})
+            entries.append({"type": "user", "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": f"t{i}", "content": "out", "is_error": i in errors}]}})
         return self.transcript(entries)
 
     def stop(self, transcript, active=False, session="s1"):
@@ -305,23 +310,45 @@ class DecisionHookTests(unittest.TestCase):
                                                         "transcript_path": transcript, "trigger": "manual"}))
 
     # --- Drift detector ----------------------------------------------------------------------------
-    def test_drift_consults_every_fifteen_tool_calls(self):
-        transcript = self.turn(*[("Read", {"file_path": f"f{i}"}) for i in range(15)])
+    def test_drift_consults_every_thirty_tool_calls(self):
+        transcript = self.turn(*[("Read", {"file_path": f"f{i}"}) for i in range(30)])
         event = {"hook_event_name": "PostToolUse", "tool_name": "Read", "session_id": "s2",
                  "transcript_path": transcript, "tool_input": {}}
         self.gateway.replies.append((200, choice("direction", "stuck", 0.8)))
-        outputs = [self.run_hook("drift", event) for _ in range(15)]
-        self.assertTrue(all(out is None for out in outputs[:14]))
+        outputs = [self.run_hook("drift", event) for _ in range(30)]
+        self.assertTrue(all(out is None for out in outputs[:29]))
         self.assertEqual(len(self.gateway.requests), 1)
         _, body = self.gateway.requests[0]
         self.assertEqual(body["state"]["request"], "Fix the bug")
-        self.assertEqual(len(body["state"]["recent_actions"]), 15)
+        self.assertEqual(body["state"]["earlier_requests"], [])
+        self.assertEqual(body["state"]["previous_reply"], "")
+        self.assertEqual(len(body["state"]["recent_actions"]), 30)
         self.assertNotIn("risk", body)  # default low threshold: the instructions, not a higher bar, avoid false alarms
-        self.assertIn("stuck", outputs[14]["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("stuck", outputs[29]["hookSpecificOutput"]["additionalContext"])
         self.gateway.replies.append((200, choice("direction", "on_track", 0.9)))
-        outputs = [self.run_hook("drift", event) for _ in range(15)]
-        self.assertNotIn("hookSpecificOutput", outputs[14])
-        self.assertIn("on_track", outputs[14]["systemMessage"])
+        outputs = [self.run_hook("drift", event) for _ in range(30)]
+        self.assertNotIn("hookSpecificOutput", outputs[29])
+        self.assertIn("on_track", outputs[29]["systemMessage"])
+
+    def test_drift_sends_earlier_requests_and_marks_failed_actions(self):
+        transcript = self.turn(("Bash", {"command": "pytest"}), *[("Read", {"file_path": f"f{i}"}) for i in range(29)],
+                               prompt="yes", earlier=("Dropped", "Old task", "Keep it small", "Refactor the parser", "Should I also fix the tests?"),
+                               errors={0}, reply="x" * 2000 + " token=abc123 Should I fix the tests too?")
+        event = {"hook_event_name": "PostToolUse", "tool_name": "Read", "session_id": "s5",
+                 "transcript_path": transcript, "tool_input": {}}
+        self.gateway.replies.append((200, choice("direction", "on_track", 0.9)))
+        for _ in range(30):
+            self.run_hook("drift", event)
+        _, body = self.gateway.requests[0]
+        self.assertEqual(body["state"]["request"], "yes")
+        self.assertEqual(body["state"]["earlier_requests"],
+                         ["Old task", "Keep it small", "Refactor the parser", "Should I also fix the tests?"])
+        self.assertEqual(body["state"]["recent_actions"][:2], ["Bash pytest [error]", "Read f0"])
+        self.assertNotIn("out", body["state"]["recent_actions"])
+        reply = body["state"]["previous_reply"]
+        self.assertEqual(len(reply), 1000)
+        self.assertTrue(reply.startswith("…") and reply.endswith("token=[REDACTED] Should I fix the tests too?"))
+        self.assertNotIn("abc123", json.dumps(body))
 
     # --- Redaction ---------------------------------------------------------------------------------
     def test_bash_gate_redacts_credentials_in_the_command(self):
@@ -336,12 +363,12 @@ class DecisionHookTests(unittest.TestCase):
         transcript = self.turn(("Write", {"file_path": "/w/.env", "content": f"OPENAI_API_KEY={secret}\n"}),
                                ("Edit", {"file_path": "/w/a.py", "old_string": "x = 1", "new_string": "password = 'hunter2'"}),
                                ("Bash", {"command": "curl -H 'Authorization: Bearer abc123' https://api.test"}),
-                               *[("Read", {"file_path": f"f{i}"}) for i in range(12)],
+                               *[("Read", {"file_path": f"f{i}"}) for i in range(27)],
                                prompt="Wire the key OPENAI_API_KEY=" + secret + " into the app")
         event = {"hook_event_name": "PostToolUse", "tool_name": "Read", "session_id": "s3",
                  "transcript_path": transcript, "tool_input": {}}
         self.gateway.replies.append((200, choice("direction", "on_track", 0.9)))
-        for _ in range(15):
+        for _ in range(30):
             self.run_hook("drift", event)
         _, body = self.gateway.requests[0]
         actions = body["state"]["recent_actions"]
@@ -413,11 +440,11 @@ class DecisionHookTests(unittest.TestCase):
         self.assertNotIn("glpat", json.dumps(body))
         self.assertLessEqual(len(body["state"]["command"]), 4000)
         transcript = self.turn(("Bash", {"command": "echo " + "b" * 160 + " " + url}),
-                               *[("Read", {"file_path": f"f{i}"}) for i in range(14)])
+                               *[("Read", {"file_path": f"f{i}"}) for i in range(29)])
         event = {"hook_event_name": "PostToolUse", "tool_name": "Read", "session_id": "s4",
                  "transcript_path": transcript, "tool_input": {}}
         self.gateway.replies.append((200, choice("direction", "on_track", 0.9)))
-        for _ in range(15):
+        for _ in range(30):
             self.run_hook("drift", event)
         _, body = self.gateway.requests[1]
         self.assertNotIn("glpat", json.dumps(body))

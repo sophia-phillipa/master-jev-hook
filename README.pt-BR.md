@@ -142,7 +142,7 @@ abstiver, o comando é bloqueado (veja a linha do Bash abaixo).
 | `PreToolUse` (Bash) | Se um filtro local achar o comando arriscado, pergunta ao JEV se você precisa ser consultado; só pede sua confirmação quando o JEV tem certeza ≥ 0,80 de que o comando é grave, irreversível e vai além do que você pediu, senão vale o fluxo normal de permissões. Envia suas 3 últimas mensagens (com segredos mascarados e truncadas) como contexto, para que comandos que você pediu rodem sem perguntas. Um comando que desliga o gateway `master-jev-hook` (`systemctl` `stop`/`disable`/`mask`/`kill`) é conferido com o seu pedido: se o pedido exige isso, ele roda; senão, é bloqueado com um motivo para o agente. Você nunca é consultado sobre isso, e o portão nunca libera um comando por conta própria |
 | `Stop` | Se houve edição sem verificação depois, pergunta ao JEV; alerta o agente, no máximo três vezes por sessão |
 | `PreCompact` | Pergunta ao JEV, mensagem a mensagem, o que vale a pena preservar antes de compactar |
-| `PostToolUse` (todas as ferramentas) | A cada 15 ferramentas, pergunta ao JEV se a sessão segue no rumo, travou ou saiu do escopo |
+| `PostToolUse` (todas as ferramentas) | A cada 30 ferramentas, pergunta ao JEV se a sessão segue no rumo, travou ou saiu do escopo |
 
 ### Painel
 
@@ -411,10 +411,12 @@ gateway):
   e a mensagem final do agente (até 3.000 caracteres).
 - **Compactação** (PreCompact): até 32 mensagens do próprio usuário na
   transcrição (até 1.500 caracteres cada).
-- **Detector de desvio** (a cada 15 chamadas de ferramenta): o último pedido
-  do usuário e, das chamadas mais recentes, só o nome da ferramenta e o
-  caminho do arquivo ou o comando — nunca o conteúdo de arquivos nem os
-  trechos de edição.
+- **Detector de desvio** (a cada 30 chamadas de ferramenta): o último pedido
+  do usuário e os quatro anteriores (até 1.500 caracteres cada), os últimos 1.000
+  caracteres da resposta do agente logo antes do pedido e, das chamadas
+  mais recentes, só o nome da ferramenta, o caminho do arquivo ou o comando e
+  se ela falhou — nunca o conteúdo de arquivos, os trechos de edição nem a
+  saída das ferramentas.
 
 Antes de enviar, os hooks mascaram segredos óbvios, em regime de melhor
 esforço: credenciais em URLs (`https://usuario:token@…`), tokens `Bearer`

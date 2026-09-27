@@ -52,7 +52,7 @@ PRINT_STATUS = ("Master-JEV Hook session check (real result of a paid JEV call m
                 "In your next reply, before anything else, print the block below verbatim inside a ```text code block, "
                 "without summarizing or translating it; then answer normally.")
 STOP_LIMIT = 3  # feedbacks per session
-DRIFT_EVERY = 15  # tool calls between checks
+DRIFT_EVERY = 30  # tool calls between checks
 KEEP_NOUL = 0.7  # minimum probability to keep an item during compaction
 # Best-effort removal of obvious secrets before anything leaves the machine.
 SENSITIVE = r"(?<![\w.-])(?=[\w.-]*?(?:key|token|secret|passw(?:or)?d|auth(?:orization|entication)?(?![a-z])|credential))[\w.-]*+"
@@ -372,21 +372,35 @@ def drift(event):
     path.write_text(json.dumps({"calls": count}), encoding="utf-8")
     if count % DRIFT_EVERY:
         return None
-    prompt, tools = current_turn(entries(event.get("transcript_path")))
-    # Only what was touched, never file contents or edit strings.
+    rows = entries(event.get("transcript_path"))
+    prompt, tools = current_turn(rows)
+    asked = [i for i, row in enumerate(rows) if prompt_text(row)]
+    earlier = [text(prompt_text(rows[i]), 1500) for i in asked[-5:-1]]
+    # The tail of the agent's reply before the current prompt: where the question a short "yes" answers usually sits.
+    between = rows[asked[-2] + 1:asked[-1]] if len(asked) > 1 else []
+    reply = " ".join(" ".join(redact(b.get("text", "")).split()) for row in between if row["type"] == "assistant"
+                     for b in (row["message"].get("content") or []) if isinstance(b, dict) and b.get("type") == "text")
+    reply = reply if len(reply) <= 1000 else "…" + reply[-999:]
+    # Only what was touched and whether it failed, never file contents, edit strings or tool output.
+    failed = {b.get("tool_use_id") for row in rows if row["type"] == "user" and isinstance(row["message"].get("content"), list)
+              for b in row["message"]["content"] if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error")}
     actions = [text(f"{t.get('name', '?')} {(t.get('input') or {}).get('file_path') or (t.get('input') or {}).get('command') or ''}".strip(), 200)
-               for t in tools[-DRIFT_EVERY:]]
+               + (" [error]" if t.get("id") in failed else "") for t in tools[-DRIFT_EVERY:]]
     if not prompt or not actions:
         return None
-    data = gateway({"state": {"request": text(prompt, 2000), "recent_actions": actions},
+    data = gateway({"state": {"request": text(prompt, 2000), "earlier_requests": earlier, "previous_reply": reply,
+                              "recent_actions": actions},
                     "questions": {"direction": {"type": "choice", "instructions": (
-                        "A coding agent is working on the request in `request`. `recent_actions` lists its latest tool calls. "
-                        "How is the work going? Risky or destructive commands are on track when the request asks for them; "
-                        "if the request only points to instructions elsewhere (a file, an earlier message), do not answer "
-                        "out_of_scope unless the actions clearly contradict it."),
+                        "A coding agent is working on the request in `request`; `earlier_requests` holds the user's previous "
+                        "messages (most recent last) and `previous_reply` the end of the agent's reply right before `request`. "
+                        "They give context when `request` is a short follow-up such as \"yes\" or \"go ahead\": it usually "
+                        "answers the question or proposal at the end of `previous_reply`. `recent_actions` lists its latest tool calls; those marked [error] failed, the rest "
+                        "succeeded. How is the work going? Risky or destructive commands are on track when the request asks "
+                        "for them; if the request only points to instructions elsewhere (a file, an earlier message), do not "
+                        "answer out_of_scope unless the actions clearly contradict it."),
                         "criteria": {
                             "on_track": "The actions make coherent progress on the request.",
-                            "stuck": "It repeats similar actions without visible progress.",
+                            "stuck": "It repeats similar actions, or keeps hitting errors, without visible progress.",
                             "out_of_scope": "The actions drift away from what was requested.",
                             "needs_user": "It needs a decision or information from the user to continue."}}}},
                    timeout=5)
