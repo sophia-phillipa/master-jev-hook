@@ -15,10 +15,14 @@ from urllib import error, request
 
 HERE = Path(__file__).resolve().parent
 MCP_PREFIX = "mcp__master-jev-hook__"
-REMINDER = ("Mandatory Master-JEV Hook rule: if this message leads to a decision with explicit "
-            "eligible alternatives, call `request_decision` and wait for the result before deciding; "
-            "announce it with the 🔷 line. With no real alternatives or an already-resolved decision, "
-            "proceed directly.")
+REMINDER = ("Mandatory Master-JEV Hook rule: consult the JEV when it replaces your own reading or judging; the goal is "
+            "fewer Claude tokens, not more JEV calls. Choosing between approaches, files, sources, parameters "
+            "or next steps → `request_decision`. About to read, compare or judge 3+ items (files, search hits, "
+            "findings, options) → triage first with `jev_rank`/`jev_classify`/`jev_score` and read only what it "
+            "keeps. Checking a claim or whether something is done/correct → `jev_verify`. Keep queries lean: "
+            "ids, names and short snippets (e.g. grep lines), never whole files; never read items just to "
+            "describe them to the JEV. Skip when exactly one option exists, the user already decided, or "
+            "writing the query costs more than doing it yourself. Announce each call with the 🔷 lines.")
 
 
 # Commands that justify a paid query; everything else passes through without asking the JEV.
