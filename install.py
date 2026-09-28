@@ -123,8 +123,7 @@ def stale_hook(command, current):
         argv = shlex.split(command)
     except ValueError:
         return False
-    return (len(argv) == 3 and Path(argv[1]).name == "claude_jev.py"
-            and argv[2] in {mode for _, _, mode, _, _ in HOOKS})
+    return len(argv) == 3 and Path(argv[1]).name == "claude_jev.py"
 
 
 def desktop_default():
