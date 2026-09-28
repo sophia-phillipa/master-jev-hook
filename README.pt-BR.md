@@ -109,6 +109,17 @@ faz o `POST` direto em `/master/decide` e lê as mesmas respostas na volta.
 | `jev_score` | `/master/decide` | Uma Score por critério, com pesos opcionais | Pontuar risco, qualidade ou urgência |
 | `jev_rank` | `/master/decide` | Uma Score por candidato, com ranking | Triar itens antes de ler tudo |
 
+O servidor MCP marca as 5 ferramentas com `_meta["anthropic/alwaysLoad"]:
+true`, e o instalador grava `"alwaysLoad": true` no nível do servidor para a
+entrada `master-jev-hook` em `~/.claude.json`, mas só para o Claude Code —
+não para a configuração do Claude Desktop. Isso mantém as ferramentas
+carregadas de antemão na CLI e em execuções headless. O app Claude Desktop
+continua adiando essas ferramentas mesmo assim (bug do upstream
+[anthropics/claude-code#86284](https://github.com/anthropics/claude-code/issues/86284),
+[#88483](https://github.com/anthropics/claude-code/issues/88483)), por isso
+o hook `SessionStart` (veja a tabela de hooks abaixo) pede um `ToolSearch`
+único e antecipado por conta própria.
+
 ### Limiares de confiança por risco
 
 Cada consulta informa o risco da ação (`risk`); o gateway exige uma
@@ -135,7 +146,7 @@ abstiver, o comando é bloqueado (veja a linha do Bash abaixo).
 
 | Evento | O que faz |
 | --- | --- |
-| `SessionStart` | Injeta a regra de orquestração na sessão, se ainda não estiver carregada como regra do Claude Code (`~/.claude/rules/master-jev-hook.md`); após compactação, reinjeta o que o JEV marcou como relevante. Também roda um autoteste real e pago (uma chamada ao gateway, cerca de 300 ms e 540 tokens): a mesma pergunta em cada modalidade do JEV (Choice, Score, Noul), com ✅/⚠️/❌ por modalidade. Só diz `Master-JEV Hook gateway active` quando as três respondem corretamente, e o Claude imprime o resultado completo, sem alterar, no topo da próxima resposta, já que o app desktop não mostra o `systemMessage` do SessionStart |
+| `SessionStart` | Injeta a regra de orquestração na sessão, se ainda não estiver carregada como regra do Claude Code (`~/.claude/rules/master-jev-hook.md`); após compactação, reinjeta o que o JEV marcou como relevante. Também roda um autoteste real e pago (uma chamada ao gateway, cerca de 300 ms e 540 tokens): a mesma pergunta em cada modalidade do JEV (Choice, Score, Noul), com ✅/⚠️/❌ por modalidade. Só diz `Master-JEV Hook gateway active` quando as três respondem corretamente, e o Claude imprime o resultado completo, sem alterar, no topo da próxima resposta, já que o app desktop não mostra o `systemMessage` do SessionStart. Nessa mesma resposta, se as 5 ferramentas do JEV estiverem listadas como adiadas, também pede uma única chamada antecipada de `ToolSearch` para carregá-las (pulada se já estiverem carregadas), confirmada com `🔷 MCP Master-JEV Hook loaded: <n>/5 tools ready.` |
 | `UserPromptSubmit` | Lembrete da regra baseado em gatilho a cada mensagem: chamar `request_decision` antes de qualquer decisão com alternativas explícitas, triar 3+ itens e checar afirmações com as ferramentas em lote, com consultas enxutas |
 | `PreToolUse` (ferramentas do gateway) | Avisa antes de cada consulta ao JEV |
 | `PostToolUse` (ferramentas do gateway) | Avisa o resultado da consulta |

@@ -110,6 +110,17 @@ and drift) skip the MCP adapter: `claude_jev.py` posts straight to
 | `jev_score` | `/master/decide` | One Score per criterion, with optional weights | Scoring risk, quality or urgency |
 | `jev_rank` | `/master/decide` | One Score per candidate, with ranking | Triaging items before reading everything |
 
+The MCP server marks all 5 tools `_meta["anthropic/alwaysLoad"]: true`, and
+the installer writes a server-level `"alwaysLoad": true` for the
+`master-jev-hook` entry in `~/.claude.json`, but only for Claude Code — not
+for Claude Desktop's config. This keeps the tools loaded upfront in the CLI
+and in headless runs. The Claude Desktop app still defers them behind
+`ToolSearch` regardless (upstream bug
+[anthropics/claude-code#86284](https://github.com/anthropics/claude-code/issues/86284),
+[#88483](https://github.com/anthropics/claude-code/issues/88483)), which is
+why the `SessionStart` hook (see the hooks table below) asks for one upfront
+`ToolSearch` of its own.
+
 ### Confidence thresholds by risk
 
 Each query reports the risk of the action (`risk`); the gateway
@@ -136,7 +147,7 @@ it, or abstains, the command is blocked (see the Bash row below).
 
 | Event | What it does |
 | --- | --- |
-| `SessionStart` | Injects the orchestration rule into the session, if not already loaded as a Claude Code rule (`~/.claude/rules/master-jev-hook.md`); after compaction, reinjects what JEV marked as relevant. Also runs a live, paid self-test (one gateway call, about 300 ms and 540 tokens): the same question in each JEV modality (Choice, Score, Noul), with ✅/⚠️/❌ per modality. It says `Master-JEV Hook gateway active` only when all three answered correctly, and Claude prints the full result verbatim at the top of its next reply, since the desktop app does not show a SessionStart `systemMessage` |
+| `SessionStart` | Injects the orchestration rule into the session, if not already loaded as a Claude Code rule (`~/.claude/rules/master-jev-hook.md`); after compaction, reinjects what JEV marked as relevant. Also runs a live, paid self-test (one gateway call, about 300 ms and 540 tokens): the same question in each JEV modality (Choice, Score, Noul), with ✅/⚠️/❌ per modality. It says `Master-JEV Hook gateway active` only when all three answered correctly, and Claude prints the full result verbatim at the top of its next reply, since the desktop app does not show a SessionStart `systemMessage`. In that same reply, if the 5 JEV tools are listed as deferred, it also asks for a single upfront `ToolSearch` call to load them (skipped when they are already loaded), confirmed with `🔷 MCP Master-JEV Hook loaded: <n>/5 tools ready.` |
 | `UserPromptSubmit` | Trigger-based reminder of the rule on every message: call `request_decision` before any decision with explicit alternatives, triage 3+ items and check claims with the batch tools, with lean queries |
 | `PreToolUse` (gateway tools) | Announces before each JEV query |
 | `PostToolUse` (gateway tools) | Announces the query result |
