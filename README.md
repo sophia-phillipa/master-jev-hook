@@ -136,8 +136,8 @@ it, or abstains, the command is blocked (see the Bash row below).
 
 | Event | What it does |
 | --- | --- |
-| `SessionStart` | Injects the orchestration rule into the session, if not already in `CLAUDE.md`; after compaction, reinjects what JEV marked as relevant. Also runs a live, paid self-test (one gateway call, about 300 ms and 540 tokens): the same question in each JEV modality (Choice, Score, Noul), with ✅/⚠️/❌ per modality. It says `Master-JEV Hook gateway active` only when all three answered correctly, and Claude prints the full result verbatim at the top of its next reply, since the desktop app does not show a SessionStart `systemMessage` |
-| `UserPromptSubmit` | Short reminder of the rule on every message |
+| `SessionStart` | Injects the orchestration rule into the session, if not already loaded as a Claude Code rule (`~/.claude/rules/master-jev-hook.md`); after compaction, reinjects what JEV marked as relevant. Also runs a live, paid self-test (one gateway call, about 300 ms and 540 tokens): the same question in each JEV modality (Choice, Score, Noul), with ✅/⚠️/❌ per modality. It says `Master-JEV Hook gateway active` only when all three answered correctly, and Claude prints the full result verbatim at the top of its next reply, since the desktop app does not show a SessionStart `systemMessage` |
+| `UserPromptSubmit` | Trigger-based reminder of the rule on every message: consult the JEV for a choice, a 3+ item triage or a claim check when it replaces Claude's own reading or judging, with lean queries (goal: fewer Claude tokens) |
 | `PreToolUse` (gateway tools) | Announces before each JEV query |
 | `PostToolUse` (gateway tools) | Announces the query result |
 | `PreToolUse` (Bash) | If a local filter finds the command risky, asks JEV whether you need to be asked; asks you only when JEV is ≥ 0.80 sure the command is severe, irreversible and beyond what you asked, otherwise the normal permission flow applies. It sends your last 3 messages (redacted, truncated) as context, so commands you asked for run without questions. A command that turns off the `master-jev-hook` gateway (`systemctl` `stop`/`disable`/`mask`/`kill`) is checked against your request: if your request requires it, it runs; otherwise it is blocked with a reason to the agent. You are never asked about it, and the gate never allows a command on its own |
@@ -298,7 +298,7 @@ whole plan is validated before any write; the installation is idempotent
 and backs up what it replaces.
 
 With the `CLAUDE_CONFIG_DIR` environment variable set, `install.py` writes
-`settings.json`, `CLAUDE.md`, `skills/` and `.claude.json` directly to
+`settings.json`, `rules/`, `skills/` and `.claude.json` directly to
 `$CLAUDE_CONFIG_DIR` (including as the default for `--claude-home`), instead
 of `~/.claude` and `~/.claude.json`.
 
@@ -356,7 +356,7 @@ backup path from step 7 and any step you skipped. To undo, follow the
 ## 🖥️ Claude Desktop (Chat mode)
 
 In Chat mode, Claude Desktop sees the MCP server, but does not read
-`CLAUDE.md` nor run the Claude Code hooks. For the same level of
+`CLAUDE.md`, Claude Code rules, nor run the Claude Code hooks. For the same level of
 instruction in this mode, the installer generates two files in the
 installation prefix:
 
@@ -455,8 +455,11 @@ replace `~/.claude` and `~/.claude.json` below with `$CLAUDE_CONFIG_DIR` and
   from `claude_desktop_config.json`.
 - Remove the hooks whose command contains `PREFIX/claude_jev.py` in
   `~/.claude/settings.json`.
-- Remove the `master-jev-hook-claude` block from `~/.claude/CLAUDE.md` and
-  the `~/.claude/skills/master-jev-hook/` folder.
+- Remove `~/.claude/rules/master-jev-hook.md` (only if it still has the
+  `<!-- master-jev-hook-claude:managed -->` marker on its first line), any
+  leftover `master-jev-hook-claude` block from `~/.claude/CLAUDE.md` (older
+  installs wrote the guide there), and the
+  `~/.claude/skills/master-jev-hook/` folder.
 - Remove the `# master-jev-hook:begin`/`# master-jev-hook:end` block from
   `$CODEX_HOME/config.toml` and the `<!-- master-jev-hook:begin -->`/
   `<!-- master-jev-hook:end -->` block from `$CODEX_HOME/AGENTS.md`.

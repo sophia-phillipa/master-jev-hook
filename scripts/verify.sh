@@ -41,7 +41,7 @@ check "master-jev-mcp.mjs" "cmp -s '$REPO/gateway/bin/master-jev-mcp.mjs' '$PREF
 echo "Claude Code"
 if [ -d "$CLAUDE_HOME" ]; then
   check "master-jev-hook skill" "cmp -s '$REPO/skills/master-jev-hook/SKILL.md' '$CLAUDE_HOME/skills/master-jev-hook/SKILL.md'"
-  check "managed block in CLAUDE.md" "grep -q 'master-jev-hook-claude:begin' '$CLAUDE_HOME/CLAUDE.md'"
+  check "guide rule file" "grep -q 'master-jev-hook-claude:managed' '$CLAUDE_HOME/rules/master-jev-hook.md'"
   mcp_json "$CLAUDE_JSON"
   python3 - "$CLAUDE_HOME/settings.json" <<'PY' || failures=$((failures + 1))
 import json, sys

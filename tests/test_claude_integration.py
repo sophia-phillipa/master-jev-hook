@@ -52,7 +52,8 @@ class ClaudeIntegrationTests(unittest.TestCase):
             self.assertEqual(len(list((prefix / "backups").iterdir())), 1)
             self.assertEqual(json.loads(before[home / "settings.json"])["permissions"], settings["permissions"])
             self.assertEqual(json.loads(before[home / "settings.json"])["hooks"]["SessionStart"][0], settings["hooks"]["SessionStart"][0])
-            self.assertTrue(before[home / "CLAUDE.md"].decode().startswith("Existing instructions\n"))
+            # No legacy block in CLAUDE.md: the file is left untouched, byte-exact.
+            self.assertEqual(before[home / "CLAUDE.md"].decode(), "Existing instructions\n")
             chat_guide = (prefix / "master-jev-hook-claude-chat.md").read_text()
             self.assertIn("request_decision", chat_guide)
             self.assertNotIn("master-jev-hook-claude-chat", before[home / "CLAUDE.md"].decode())
@@ -65,12 +66,14 @@ class ClaudeIntegrationTests(unittest.TestCase):
                 self.assertEqual(mcp["args"], [str(prefix / "master-jev-mcp.mjs")])
                 self.assertEqual(mcp["env"]["MASTER_JEV_GATEWAY_KEY"], "private")
                 self.assertEqual(mcp["env"]["EXTRA"], "kept")
-            self.assertIn("request_decision", before[home / "CLAUDE.md"].decode())
+            rule = (home / "rules/master-jev-hook.md").read_text()
+            self.assertTrue(rule.startswith("<!-- master-jev-hook-claude:managed -->"))
+            self.assertIn("request_decision", rule)
             config = (prefix / "claude_jev.json").read_text()
             # Unreachable gateway: the session-start self-test must not make a real, paid call here.
             (prefix / "claude_jev.json").write_text(json.dumps({"gateway_url": "http://127.0.0.1:9", "guide_in_memory": True}))
             for source in ("startup", "resume", "clear", "compact", "fork"):
-                # Guide already in CLAUDE.md: SessionStart does not repeat it (token savings), only the gateway status.
+                # Guide already loaded as a Claude Code rule: SessionStart does not repeat it (token savings), only the gateway status.
                 result = subprocess.run([sys.executable, str(prefix / "claude_jev.py"), "hook"],
                     input=json.dumps({"hook_event_name": "SessionStart", "source": source}),
                     text=True, capture_output=True, check=True, timeout=5)
@@ -183,9 +186,37 @@ class ClaudeIntegrationTests(unittest.TestCase):
             _, backup = install(home, prefix, "all", code, desktop, node=shutil.which("node"))
             self.assertIsNone(backup)
             self.assertEqual(before, (prefix / "master-jev-hook-skill.zip").read_bytes())
-            memory = (home / "CLAUDE.md").read_text()
-            self.assertIn("master-jev-hook", memory)
-            self.assertLess(len(memory), 3500)
+            self.assertFalse((home / "CLAUDE.md").exists())  # No legacy block to migrate: never created.
+            rule = (home / "rules/master-jev-hook.md").read_text()
+            self.assertIn("master-jev-hook", rule)
+            self.assertLess(len(rule), 3500)
+
+    def test_legacy_claude_md_block_migrates_to_rule_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home, prefix, code, desktop = self.paths(Path(directory))
+            home.mkdir()
+            guide = (installer.ROOT / "master-jev-hook-claude.md").read_text()
+            legacy = ("Before text\n\n<!-- master-jev-hook-claude:begin -->\n" + guide
+                      + "\n<!-- master-jev-hook-claude:end -->\n\nAfter text\n")
+            (home / "CLAUDE.md").write_text(legacy)
+            install(home, prefix, "claude-code", code, desktop, node=shutil.which("node"))
+            self.assertEqual((home / "CLAUDE.md").read_text(), "Before text\n\nAfter text\n")
+            rule = (home / "rules/master-jev-hook.md").read_text()
+            self.assertTrue(rule.startswith("<!-- master-jev-hook-claude:managed -->"))
+            self.assertIn("request_decision", rule)
+            before = (home / "CLAUDE.md").read_bytes()
+            _, backup = install(home, prefix, "claude-code", code, desktop, node=shutil.which("node"))
+            self.assertIsNone(backup)  # Idempotent: no block left to strip, nothing to change.
+            self.assertEqual(before, (home / "CLAUDE.md").read_bytes())
+
+    def test_existing_unmanaged_rule_file_is_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home, prefix, code, desktop = self.paths(Path(directory))
+            (home / "rules").mkdir(parents=True)
+            (home / "rules/master-jev-hook.md").write_text("mine\n")
+            with self.assertRaisesRegex(ValueError, "master-jev-hook.md"):
+                install(home, prefix, "claude-code", code, desktop, node=shutil.which("node"))
+            self.assertEqual((home / "rules/master-jev-hook.md").read_text(), "mine\n")
 
     def test_existing_unmanaged_skill_is_not_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:

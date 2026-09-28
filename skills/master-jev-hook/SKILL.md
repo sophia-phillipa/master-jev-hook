@@ -27,8 +27,11 @@ Required reading before changing a pattern: https://docs.typesafe.ai
 | Evaluating something on several dimensions (risk, quality, urgency) | `jev_score` (Score, optional weights) | Long textual analysis |
 | Choosing an approach, source, parameter, next action | `request_decision` (candidates + criterion + evidence) | Deliberating alone |
 
-Mandatory rule: when explicit eligible alternatives exist, consult the JEV and
-wait for the result before deciding. With a single valid option, proceed directly.
+Mandatory rule: consult the JEV when it replaces your own reading or judging
+(see the full triggers in `master-jev-hook-claude.md`); the goal is fewer
+Claude tokens, not more JEV calls. Keep queries lean: ids, names and short
+snippets, never whole files. Skip when exactly one option exists, the user
+already decided, or writing the query costs more than doing it yourself.
 
 ## How to formulate queries (jev-1.13)
 

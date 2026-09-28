@@ -135,8 +135,8 @@ abstiver, o comando é bloqueado (veja a linha do Bash abaixo).
 
 | Evento | O que faz |
 | --- | --- |
-| `SessionStart` | Injeta a regra de orquestração na sessão, se ainda não estiver no `CLAUDE.md`; após compactação, reinjeta o que o JEV marcou como relevante. Também roda um autoteste real e pago (uma chamada ao gateway, cerca de 300 ms e 540 tokens): a mesma pergunta em cada modalidade do JEV (Choice, Score, Noul), com ✅/⚠️/❌ por modalidade. Só diz `Master-JEV Hook gateway active` quando as três respondem corretamente, e o Claude imprime o resultado completo, sem alterar, no topo da próxima resposta, já que o app desktop não mostra o `systemMessage` do SessionStart |
-| `UserPromptSubmit` | Lembrete curto da regra a cada mensagem |
+| `SessionStart` | Injeta a regra de orquestração na sessão, se ainda não estiver carregada como regra do Claude Code (`~/.claude/rules/master-jev-hook.md`); após compactação, reinjeta o que o JEV marcou como relevante. Também roda um autoteste real e pago (uma chamada ao gateway, cerca de 300 ms e 540 tokens): a mesma pergunta em cada modalidade do JEV (Choice, Score, Noul), com ✅/⚠️/❌ por modalidade. Só diz `Master-JEV Hook gateway active` quando as três respondem corretamente, e o Claude imprime o resultado completo, sem alterar, no topo da próxima resposta, já que o app desktop não mostra o `systemMessage` do SessionStart |
+| `UserPromptSubmit` | Lembrete da regra baseado em gatilho a cada mensagem: consultar o JEV numa escolha, numa triagem de 3+ itens ou na checagem de uma afirmação quando isso substitui leitura ou julgamento do Claude, com consultas enxutas (meta: menos tokens do Claude) |
 | `PreToolUse` (ferramentas do gateway) | Avisa antes de cada consulta ao JEV |
 | `PostToolUse` (ferramentas do gateway) | Avisa o resultado da consulta |
 | `PreToolUse` (Bash) | Se um filtro local achar o comando arriscado, pergunta ao JEV se você precisa ser consultado; só pede sua confirmação quando o JEV tem certeza ≥ 0,80 de que o comando é grave, irreversível e vai além do que você pediu, senão vale o fluxo normal de permissões. Envia suas 3 últimas mensagens (com segredos mascarados e truncadas) como contexto, para que comandos que você pediu rodem sem perguntas. Um comando que desliga o gateway `master-jev-hook` (`systemctl` `stop`/`disable`/`mask`/`kill`) é conferido com o seu pedido: se o pedido exige isso, ele roda; senão, é bloqueado com um motivo para o agente. Você nunca é consultado sobre isso, e o portão nunca libera um comando por conta própria |
@@ -294,7 +294,7 @@ mesmo assim. Outras opções úteis: `--node`, `--gateway-url`, `--claude-home`,
 qualquer escrita; a instalação é idempotente e faz backup do que substitui.
 
 Com a variável de ambiente `CLAUDE_CONFIG_DIR` definida, `install.py` grava
-`settings.json`, `CLAUDE.md`, `skills/` e `.claude.json` diretamente em
+`settings.json`, `rules/`, `skills/` e `.claude.json` diretamente em
 `$CLAUDE_CONFIG_DIR` (inclusive como padrão de `--claude-home`), em vez de
 `~/.claude` e `~/.claude.json`.
 
@@ -352,7 +352,7 @@ pulado. Para desfazer, siga a seção ♻️ Desinstalar / restaurar backup.
 ## 🖥️ Claude Desktop (modo Chat)
 
 No modo Chat, o Claude Desktop enxerga o servidor MCP, mas não lê o
-`CLAUDE.md` nem roda os hooks do Claude Code. Para o mesmo nível de instrução
+`CLAUDE.md`, nem as regras do Claude Code, nem roda os hooks do Claude Code. Para o mesmo nível de instrução
 nesse modo, o instalador gera dois arquivos no prefixo de instalação:
 
 - `master-jev-hook-claude-chat.md`: instruções equivalentes às do Claude Code,
@@ -452,8 +452,10 @@ Para desinstalar manualmente (se a instalação usou `CLAUDE_CONFIG_DIR`, troque
   `claude_desktop_config.json`.
 - Remova os hooks cujo comando contém `PREFIX/claude_jev.py` em
   `~/.claude/settings.json`.
-- Remova o bloco `master-jev-hook-claude` do `~/.claude/CLAUDE.md` e a pasta
-  `~/.claude/skills/master-jev-hook/`.
+- Remova `~/.claude/rules/master-jev-hook.md` (só se ainda tiver o marcador
+  `<!-- master-jev-hook-claude:managed -->` na primeira linha), qualquer bloco
+  `master-jev-hook-claude` remanescente em `~/.claude/CLAUDE.md` (instalações
+  antigas gravavam o guia ali) e a pasta `~/.claude/skills/master-jev-hook/`.
 - Remova o bloco `# master-jev-hook:begin`/`# master-jev-hook:end` de
   `$CODEX_HOME/config.toml` e o bloco `<!-- master-jev-hook:begin -->`/
   `<!-- master-jev-hook:end -->` de `$CODEX_HOME/AGENTS.md`.
