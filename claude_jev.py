@@ -15,14 +15,14 @@ from urllib import error, request
 
 HERE = Path(__file__).resolve().parent
 MCP_PREFIX = "mcp__master-jev-hook__"
-REMINDER = ("Mandatory Master-JEV Hook rule: consult the JEV when it replaces your own reading or judging; the goal is "
-            "fewer Claude tokens, not more JEV calls. Choosing between approaches, files, sources, parameters "
-            "or next steps → `request_decision`. About to read, compare or judge 3+ items (files, search hits, "
+REMINDER = ("Mandatory Master-JEV Hook rule: if this message leads to a decision with explicit eligible "
+            "alternatives (approach, file, source, parameter, review, next step), call `request_decision` and "
+            "wait for the result before deciding. About to read, compare or judge 3+ items (files, search hits, "
             "findings, options) → triage first with `jev_rank`/`jev_classify`/`jev_score` and read only what it "
             "keeps. Checking a claim or whether something is done/correct → `jev_verify`. Keep queries lean: "
             "ids, names and short snippets (e.g. grep lines), never whole files; never read items just to "
-            "describe them to the JEV. Skip when exactly one option exists, the user already decided, or "
-            "writing the query costs more than doing it yourself. Announce each call with the 🔷 lines.")
+            "describe them to the JEV. With a single valid option or an already-resolved decision, proceed "
+            "directly. Announce each call with the 🔷 lines.")
 
 
 # Commands that justify a paid query; everything else passes through without asking the JEV.
@@ -55,6 +55,16 @@ PROBE = (  # (question id, label, what the modality returns, question, expected 
 PRINT_STATUS = ("Master-JEV Hook session check (real result of a paid JEV call made by the SessionStart hook). "
                 "In your next reply, before anything else, print the block below verbatim inside a ```text code block, "
                 "without summarizing or translating it; then answer normally.")
+JEV_TOOLS = ("request_decision", "jev_classify", "jev_verify", "jev_score", "jev_rank")
+# The desktop app defers MCP tools even with alwaysLoad (anthropics/claude-code#86284); a hook cannot load
+# tools, so it asks for one ToolSearch at the start instead of one before the first consult.
+LOAD_TOOLS = ("Master-JEV Hook tools: right after printing the session check block below, in that same reply and "
+              "before answering: if the Master-JEV Hook tools are listed as deferred, "
+              "load them with ONE ToolSearch call, query `select:" + ",".join(MCP_PREFIX + t for t in JEV_TOOLS) +
+              "` (append other deferred tools you already know this task needs to the same call). Skip the call if "
+              "their full schemas are already in your tool list. Confirm on its own line from what you actually "
+              "have: `🔷 MCP Master-JEV Hook loaded: <n>/5 tools ready.`, or `❌ MCP Master-JEV Hook tools not "
+              "available (<reason>).` if none came back.")
 STOP_LIMIT = 3  # feedbacks per session
 DRIFT_EVERY = 30  # tool calls between checks
 KEEP_NOUL = 0.7  # minimum probability to keep an item during compaction
@@ -454,7 +464,7 @@ def emit(event, stdin):
         # Token savings: if the guide is already loaded as a Claude Code rule, do not repeat it; only what compaction preserved.
         guide = "" if load(HERE / "claude_jev.json", {}).get("guide_in_memory") else (HERE / "master-jev-hook-claude.md").read_text(encoding="utf-8")
         status = self_test()
-        context = (guide + preserved(event) + "\n\n" + PRINT_STATUS + "\n\n" + status).strip()
+        context = (guide + preserved(event) + "\n\n" + LOAD_TOOLS + "\n\n" + PRINT_STATUS + "\n\n" + status).strip()
         return {"systemMessage": status, "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}}
     if event.get("hook_event_name") == "UserPromptSubmit" and stdin == "prompt":
         return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": REMINDER}}

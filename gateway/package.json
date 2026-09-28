@@ -1,6 +1,6 @@
 {
   "name": "master-jev-hook",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Master-JEV Hook gateway: JEV decisions via MCP and HTTP, tool routing for LLM clients, and a local dashboard",
   "keywords": [
     "llm",
