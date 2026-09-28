@@ -142,7 +142,7 @@ def read_json(path):
     return data
 
 
-def mcp_config(data, node, script, gateway_url, path):
+def mcp_config(data, node, script, gateway_url, path, always_load=False):
     servers = data.setdefault("mcpServers", {})
     old = servers.get(NAME, {})
     if not isinstance(old, dict):
@@ -154,6 +154,10 @@ def mcp_config(data, node, script, gateway_url, path):
         raise ValueError("invalid_mcp_env: " + str(path))
     servers[NAME] = {**old, "command": str(node), "args": [str(script)],
                      "env": {**env, "MASTER_JEV_GATEWAY_URL": gateway_url}}
+    if always_load:
+        # Claude Code connects MCP servers asynchronously and defers tools that arrive late; the server-level
+        # flag makes startup wait for them, which the per-tool _meta flag alone does not.
+        servers[NAME]["alwaysLoad"] = True
     return (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
@@ -275,7 +279,7 @@ def plan(targets, home, prefix, node, code_config, desktop_config, codex_home, g
             stripped = strip_managed_block(old)
             if stripped != old:
                 changes[memory] = stripped.encode("utf-8")
-        changes[code_config] = mcp_config(read_json(code_config), node, script, gateway_url, code_config)
+        changes[code_config] = mcp_config(read_json(code_config), node, script, gateway_url, code_config, always_load=True)
         safe_target(skill_path)
         if skill_path.exists() and MANAGED not in skill_path.read_text(encoding="utf-8"):
             raise ValueError("Existing file is not managed: " + str(skill_path))

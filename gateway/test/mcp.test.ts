@@ -51,6 +51,7 @@ it("MCP exposes the tool and forwards only its structured arguments", async () =
   expect(rows[0].result.instructions).toContain("no retry");
   const names = rows[1].result.tools.map((t: any) => t.name);
   expect(names).toEqual(["request_decision", "jev_classify", "jev_verify", "jev_score", "jev_rank"]);
+  expect(rows[1].result.tools.every((t: any) => t._meta?.["anthropic/alwaysLoad"] === true)).toBe(true);
   expect(rows[2].result.isError).toBe(false);
   expect(gw.received).toEqual({ path: "/master/context", body: args });
 });

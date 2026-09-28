@@ -67,6 +67,7 @@ class ClaudeIntegrationTests(unittest.TestCase):
                 self.assertEqual(mcp["args"], [str(prefix / "master-jev-mcp.mjs")])
                 self.assertEqual(mcp["env"]["MASTER_JEV_GATEWAY_KEY"], "private")
                 self.assertEqual(mcp["env"]["EXTRA"], "kept")
+                self.assertEqual(mcp.get("alwaysLoad"), True if path == code else None)
             rule = (home / "rules/master-jev-hook.md").read_text()
             self.assertTrue(rule.startswith("<!-- master-jev-hook-claude:managed -->"))
             self.assertIn("request_decision", rule)

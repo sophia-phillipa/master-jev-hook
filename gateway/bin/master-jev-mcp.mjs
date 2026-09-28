@@ -216,7 +216,8 @@ for await (const line of createInterface({ input: process.stdin, crlfDelay: Infi
     const supported = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
     reply(message.id, { protocolVersion: supported.includes(message.params?.protocolVersion) ? message.params.protocolVersion : "2025-06-18", capabilities: { tools: {} }, instructions, serverInfo: { name: "master-jev-hook", version: "1.2.0" } });
   } else if (message.method === "ping") reply(message.id, {});
-  else if (message.method === "tools/list") reply(message.id, { tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) });
+  // alwaysLoad keeps Claude Code from deferring these tools behind ToolSearch, which cost a turn per consult.
+  else if (message.method === "tools/list") reply(message.id, { tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema, _meta: { "anthropic/alwaysLoad": true } })) });
   else if (message.method === "tools/call") {
     const toolDef = tools.find((t) => t.name === message.params?.name);
     if (!toolDef) { error(message.id, -32602, "Unknown tool"); continue; }
