@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import shutil
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -251,6 +252,20 @@ class ClaudeIntegrationTests(unittest.TestCase):
             groups = json.loads((home / "settings.json").read_text())["hooks"]["PreToolUse"]
             self.assertEqual(len(groups), 2)
             self.assertEqual(groups[0]["matcher"], "mcp__master-jev-hook__.*")
+
+    def test_reinstall_removes_hook_of_a_removed_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home, prefix, code, desktop = self.paths(Path(directory))
+            install(home, prefix, "claude-code", code, desktop, node=shutil.which("node"))
+            settings = json.loads((home / "settings.json").read_text())
+            python = str(Path(sys.executable).resolve())
+            old = " ".join(map(shlex.quote, (python, str(prefix / "claude_jev.py"), "nudge")))
+            settings["hooks"]["PreToolUse"].append({"matcher": "Read", "hooks": [{"type": "command", "command": old}]})
+            (home / "settings.json").write_text(json.dumps(settings))
+            install(home, prefix, "claude-code", code, desktop, node=shutil.which("node"))
+            groups = json.loads((home / "settings.json").read_text())["hooks"]["PreToolUse"]
+            self.assertFalse(any(h["command"] == old for g in groups for h in g["hooks"]))
+            self.assertEqual(len(groups), 2)
 
     def test_targets_and_dry_run(self):
         with tempfile.TemporaryDirectory() as directory:
