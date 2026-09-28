@@ -298,7 +298,7 @@ whole plan is validated before any write; the installation is idempotent
 and backs up what it replaces.
 
 With the `CLAUDE_CONFIG_DIR` environment variable set, `install.py` writes
-`settings.json`, `CLAUDE.md`, `skills/` and `.claude.json` directly to
+`settings.json`, `rules/`, `skills/` and `.claude.json` directly to
 `$CLAUDE_CONFIG_DIR` (including as the default for `--claude-home`), instead
 of `~/.claude` and `~/.claude.json`.
 
@@ -356,7 +356,7 @@ backup path from step 7 and any step you skipped. To undo, follow the
 ## 🖥️ Claude Desktop (Chat mode)
 
 In Chat mode, Claude Desktop sees the MCP server, but does not read
-`CLAUDE.md` nor run the Claude Code hooks. For the same level of
+`CLAUDE.md`, Claude Code rules, nor run the Claude Code hooks. For the same level of
 instruction in this mode, the installer generates two files in the
 installation prefix:
 
@@ -455,8 +455,11 @@ replace `~/.claude` and `~/.claude.json` below with `$CLAUDE_CONFIG_DIR` and
   from `claude_desktop_config.json`.
 - Remove the hooks whose command contains `PREFIX/claude_jev.py` in
   `~/.claude/settings.json`.
-- Remove the `master-jev-hook-claude` block from `~/.claude/CLAUDE.md` and
-  the `~/.claude/skills/master-jev-hook/` folder.
+- Remove `~/.claude/rules/master-jev-hook.md` (only if it still has the
+  `<!-- master-jev-hook-claude:managed -->` marker on its first line), any
+  leftover `master-jev-hook-claude` block from `~/.claude/CLAUDE.md` (older
+  installs wrote the guide there), and the
+  `~/.claude/skills/master-jev-hook/` folder.
 - Remove the `# master-jev-hook:begin`/`# master-jev-hook:end` block from
   `$CODEX_HOME/config.toml` and the `<!-- master-jev-hook:begin -->`/
   `<!-- master-jev-hook:end -->` block from `$CODEX_HOME/AGENTS.md`.

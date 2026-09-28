@@ -447,7 +447,7 @@ def emit(event, stdin):
         name, handler = DECISION_HOOKS[stdin]
         return handler(event) if event.get("hook_event_name") == name else None
     if event.get("hook_event_name") == "SessionStart" and stdin == "hook":
-        # Token savings: if the guide is already in CLAUDE.md, do not repeat it; only what compaction preserved.
+        # Token savings: if the guide is already loaded as a Claude Code rule, do not repeat it; only what compaction preserved.
         guide = "" if load(HERE / "claude_jev.json", {}).get("guide_in_memory") else (HERE / "master-jev-hook-claude.md").read_text(encoding="utf-8")
         status = self_test()
         context = (guide + preserved(event) + "\n\n" + PRINT_STATUS + "\n\n" + status).strip()

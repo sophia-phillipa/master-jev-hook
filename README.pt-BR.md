@@ -294,7 +294,7 @@ mesmo assim. Outras opções úteis: `--node`, `--gateway-url`, `--claude-home`,
 qualquer escrita; a instalação é idempotente e faz backup do que substitui.
 
 Com a variável de ambiente `CLAUDE_CONFIG_DIR` definida, `install.py` grava
-`settings.json`, `CLAUDE.md`, `skills/` e `.claude.json` diretamente em
+`settings.json`, `rules/`, `skills/` e `.claude.json` diretamente em
 `$CLAUDE_CONFIG_DIR` (inclusive como padrão de `--claude-home`), em vez de
 `~/.claude` e `~/.claude.json`.
 
@@ -352,7 +352,7 @@ pulado. Para desfazer, siga a seção ♻️ Desinstalar / restaurar backup.
 ## 🖥️ Claude Desktop (modo Chat)
 
 No modo Chat, o Claude Desktop enxerga o servidor MCP, mas não lê o
-`CLAUDE.md` nem roda os hooks do Claude Code. Para o mesmo nível de instrução
+`CLAUDE.md`, nem as regras do Claude Code, nem roda os hooks do Claude Code. Para o mesmo nível de instrução
 nesse modo, o instalador gera dois arquivos no prefixo de instalação:
 
 - `master-jev-hook-claude-chat.md`: instruções equivalentes às do Claude Code,
@@ -452,8 +452,10 @@ Para desinstalar manualmente (se a instalação usou `CLAUDE_CONFIG_DIR`, troque
   `claude_desktop_config.json`.
 - Remova os hooks cujo comando contém `PREFIX/claude_jev.py` em
   `~/.claude/settings.json`.
-- Remova o bloco `master-jev-hook-claude` do `~/.claude/CLAUDE.md` e a pasta
-  `~/.claude/skills/master-jev-hook/`.
+- Remova `~/.claude/rules/master-jev-hook.md` (só se ainda tiver o marcador
+  `<!-- master-jev-hook-claude:managed -->` na primeira linha), qualquer bloco
+  `master-jev-hook-claude` remanescente em `~/.claude/CLAUDE.md` (instalações
+  antigas gravavam o guia ali) e a pasta `~/.claude/skills/master-jev-hook/`.
 - Remova o bloco `# master-jev-hook:begin`/`# master-jev-hook:end` de
   `$CODEX_HOME/config.toml` e o bloco `<!-- master-jev-hook:begin -->`/
   `<!-- master-jev-hook:end -->` de `$CODEX_HOME/AGENTS.md`.

@@ -158,6 +158,24 @@ def mcp_config(data, node, script, gateway_url, path):
     return (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
+def strip_managed_block(old, begin=BEGIN, end=END):
+    """The inverse of managed_memory: removes the block plus the blank line it was joined with,
+    keeping every other byte of the surrounding content untouched."""
+    if old.count(begin) != old.count(end) or old.count(begin) > 1:
+        raise ValueError("invalid_memory_markers")
+    if begin not in old:
+        return old
+    start, stop = old.index(begin), old.index(end) + len(end)
+    if stop < start + len(end):
+        raise ValueError("invalid_memory_markers")
+    before, after = old[:start].rstrip("\n"), old[stop:].lstrip("\n")
+    if before and after:
+        return before + "\n\n" + after
+    if before:
+        return before + "\n"
+    return after
+
+
 def managed_memory(old, guide, begin=BEGIN, end=END):
     if old.count(begin) != old.count(end) or old.count(begin) > 1:
         raise ValueError("invalid_memory_markers")
@@ -193,10 +211,11 @@ def plan(targets, home, prefix, node, code_config, desktop_config, codex_home, g
     helper_config = prefix / "claude_jev.json"
     skill = (ROOT / "skills/master-jev-hook/SKILL.md").read_bytes()
     skill_path = home / "skills/master-jev-hook/SKILL.md"
+    rule_path = home / "rules/master-jev-hook.md"
     codex_toml, codex_agents = codex_home / "config.toml", codex_home / "AGENTS.md"
     destinations = [script, helper, guide_path, chat_guide_path, helper_config, prefix / "master-jev-hook-skill.zip"]
     if "claude-code" in targets:
-        destinations.extend((home / "settings.json", home / "CLAUDE.md", code_config, skill_path))
+        destinations.extend((home / "settings.json", home / "CLAUDE.md", rule_path, code_config, skill_path))
     if "claude-desktop" in targets:
         destinations.append(desktop_config)
     if "codex" in targets:
@@ -248,15 +267,24 @@ def plan(targets, home, prefix, node, code_config, desktop_config, codex_home, g
             elif len(groups[existing[0]].get("hooks", [])) == 1:
                 groups[existing[0]] = group  # Group is ours alone: update matcher, timeout and status.
         changes[settings_path] = (json.dumps(settings, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+        # The guide now loads as a rule file (below), not a block in CLAUDE.md; migrate away any legacy
+        # block from an earlier install, touching nothing else in the user's own memory file.
         memory = home / "CLAUDE.md"
         safe_target(memory)
-        old = memory.read_text(encoding="utf-8") if memory.exists() else ""
-        changes[memory] = managed_memory(old, guide).encode("utf-8")
+        if memory.exists():
+            old = memory.read_text(encoding="utf-8")
+            stripped = strip_managed_block(old)
+            if stripped != old:
+                changes[memory] = stripped.encode("utf-8")
         changes[code_config] = mcp_config(read_json(code_config), node, script, gateway_url, code_config)
         safe_target(skill_path)
         if skill_path.exists() and MANAGED not in skill_path.read_text(encoding="utf-8"):
             raise ValueError("Existing file is not managed: " + str(skill_path))
         changes[skill_path] = skill
+        safe_target(rule_path)
+        if rule_path.exists() and MANAGED not in rule_path.read_text(encoding="utf-8"):
+            raise ValueError("Existing file is not managed: " + str(rule_path))
+        changes[rule_path] = (MANAGED + "\n\n" + guide).encode("utf-8")
     if "claude-desktop" in targets:
         changes[desktop_config] = mcp_config(read_json(desktop_config), node, script, gateway_url, desktop_config)
     if "codex" in targets:
