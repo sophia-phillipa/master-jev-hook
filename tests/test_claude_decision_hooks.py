@@ -256,6 +256,10 @@ class DecisionHookTests(unittest.TestCase):
         context = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("print the block below verbatim", context)
         self.assertTrue(context.endswith(message))
+        # The tool-loading request comes before the verbatim block, so it is never printed as part of it.
+        load = context.index("select:mcp__master-jev-hook__request_decision,mcp__master-jev-hook__jev_classify")
+        self.assertLess(load, context.index("print the block below verbatim"))
+        self.assertIn("🔷 MCP Master-JEV Hook loaded: <n>/5 tools ready.", context)
 
     def test_session_start_flags_wrong_or_missing_answers(self):
         reply = self.probe_reply(choice="false")

@@ -82,7 +82,8 @@ class ClaudeIntegrationTests(unittest.TestCase):
                 out = json.loads(result.stdout)
                 self.assertTrue(out["systemMessage"].startswith("❌ Master-JEV Hook gateway unreachable"))
                 context = out["hookSpecificOutput"]["additionalContext"]
-                self.assertTrue(context.startswith("Master-JEV Hook session check"))
+                self.assertTrue(context.startswith("Master-JEV Hook tools:"))
+                self.assertIn("\n\nMaster-JEV Hook session check", context)
                 self.assertTrue(context.endswith(out["systemMessage"]))
             (prefix / "claude_jev.json").write_text(config)
             hooks = json.loads(before[home / "settings.json"])["hooks"]
