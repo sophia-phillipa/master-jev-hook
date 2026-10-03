@@ -1,6 +1,6 @@
 ---
 name: master-jev-hook
-description: Delegate decisions, triage, classification, ranking and verification between explicit alternatives to the JEV (TypeSafe), via the master-jev-hook gateway's MCP tools (request_decision, jev_classify, jev_verify, jev_score, jev_rank). Use before reading, comparing or judging several items, whenever a structured JEV judgment would save Claude tokens, and to formulate good Choice/Score/Noul questions.
+description: Delegates decisions, triage, classification, ranking and verification between explicit alternatives to the JEV (TypeSafe) through the master-jev-hook gateway's MCP tools (request_decision, jev_classify, jev_verify, jev_score, jev_rank). Use when about to read, compare or judge several items, when a structured JEV judgment would save Claude tokens, or when writing Choice, Score or Noul questions. Loaded on demand by the main session and any agent; no agent preloads it.
 metadata:
   domain: decision
   owner: sophia-phillipa
